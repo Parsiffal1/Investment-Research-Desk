@@ -14,6 +14,7 @@ from investment_research_desk.schemas import (
     NewsImpactResult,
     NormalizedData,
     ResearchCase,
+    ResearchDebateResult,
     RunRequest,
     SentimentResult,
     TechnicalState,
@@ -30,6 +31,7 @@ from investment_research_desk.tools.indicators import (
     trend_label,
 )
 from investment_research_desk.agents.contracts import get_agent_contract
+from investment_research_desk.agents.prompts import STRUCTURED_JSON_RULES
 
 TModel = TypeVar("TModel", bound=BaseModel)
 
@@ -74,7 +76,10 @@ class FundamentalMacroAnalyst:
     name = "fundamental_macro"
 
     def run(self, data: NormalizedData, llm: LLMClient) -> FundamentalMacroResult:
-        titles = " ".join(event.title for event in data.news_events).lower()
+        request = RunRequest(symbol=data.symbol, asset_class=data.asset_class, horizon=data.horizon)
+        relevant_events, ranked_events = _filter_relevant_news_events(data.news_events, request)
+        evidence_events = relevant_events or data.news_events
+        titles = " ".join(event.title for event in evidence_events).lower()
         drivers = []
         concerns = []
         profile = data.source_metadata.get("fmp_profile") or {}
@@ -109,7 +114,7 @@ class FundamentalMacroAnalyst:
             key_drivers=drivers,
             concerns=concerns,
             confidence=0.66,
-            evidence=[event.title for event in data.news_events[:3]],
+            evidence=[event.title for event in evidence_events[:3]],
         )
         return _llm_structured(
             self.name,
@@ -118,7 +123,13 @@ class FundamentalMacroAnalyst:
                 "symbol": data.symbol,
                 "asset_class": data.asset_class,
                 "source_metadata": data.source_metadata,
-                "news_events": [event.model_dump(mode="json") for event in data.news_events[:8]],
+                "news_events": [event.model_dump(mode="json") for event in evidence_events[:8]],
+                "ranked_candidate_news_events": ranked_events[:16],
+                "instruction": (
+                    "For crypto and SWAP instruments, treat equity-style fundamentals as unavailable unless supplied. "
+                    "Do not use unrelated company headlines as direct evidence. Use ranked_candidate_news_events to "
+                    "separate direct, macro, indirect, and low-relevance evidence."
+                ),
             },
             FundamentalMacroResult,
             fallback,
@@ -129,14 +140,18 @@ class NewsImpactAnalyst:
     name = "news_impact"
 
     def run(self, data: NormalizedData, llm: LLMClient) -> NewsImpactResult:
-        fallback = self._fallback(data)
+        request = RunRequest(symbol=data.symbol, asset_class=data.asset_class, horizon=data.horizon)
+        relevant_events, ranked_events = _filter_relevant_news_events(data.news_events, request)
+        scoped_data = data.model_copy(update={"news_events": relevant_events or data.news_events})
+        fallback = self._fallback(scoped_data)
         return _llm_structured(
             self.name,
             llm,
             {
                 "symbol": data.symbol,
                 "asset_class": data.asset_class,
-                "news_events": [event.model_dump(mode="json") for event in data.news_events[:12]],
+                "news_events": [event.model_dump(mode="json") for event in scoped_data.news_events[:12]],
+                "ranked_candidate_news_events": ranked_events[:16],
             },
             NewsImpactResult,
             fallback,
@@ -199,11 +214,13 @@ class NewsImpactAnalyst:
                     "planned_by_llm": True,
                 },
             )
+        relevant_events, ranked_events = _filter_relevant_news_events(collected_events, request)
+        filtered_candidate_count = len(_dedupe_news_events(collected_events)) - len(relevant_events)
         planned_data = NormalizedData(
             symbol=request.symbol,
             asset_class=request.asset_class,
             horizon=request.horizon,
-            news_events=_dedupe_news_events(collected_events),
+            news_events=relevant_events or _dedupe_news_events(collected_events),
         )
         result = _llm_structured(
             self.name,
@@ -214,10 +231,12 @@ class NewsImpactAnalyst:
                 "horizon": request.horizon,
                 "llm_query_plan": plan.model_dump(mode="json"),
                 "candidate_news_events": [event.model_dump(mode="json") for event in planned_data.news_events[:16]],
+                "ranked_candidate_news_events": ranked_events[:24],
+                "filtered_candidate_count": filtered_candidate_count,
                 "instruction": (
                     "The LLM first optimized/refined the news queries in llm_query_plan. "
-                    "Now evaluate the returned candidate events, reject unrelated items, and admit only evidence "
-                    "with a direct instrument, sector, or macro link."
+                    "Use ranked_candidate_news_events to reject unrelated items. Admit evidence only when relevance is "
+                    "direct, macro, or indirect with an explicit transmission channel. Do not cite low-relevance items."
                 ),
             },
             NewsImpactResult,
@@ -239,7 +258,8 @@ class NewsImpactAnalyst:
                     break
         if forced_contract_calls:
             all_events = _dedupe_news_events(collected_events)
-            related_events = _instrument_related_news_events(all_events, request)
+            related_events, ranked_events = _filter_relevant_news_events(all_events, request)
+            relevant_events = related_events
             filtered_candidate_count = len(all_events) - len(related_events or all_events)
             refinement_data = NormalizedData(
                 symbol=request.symbol,
@@ -255,6 +275,7 @@ class NewsImpactAnalyst:
                     "asset_class": request.asset_class,
                     "horizon": request.horizon,
                     "news_events": [event.model_dump(mode="json") for event in refinement_data.news_events[:16]],
+                    "ranked_candidate_news_events": ranked_events[:24],
                     "filtered_candidate_count": filtered_candidate_count,
                     "llm_tool_calls": tool_calls,
                     "forced_contract_calls": forced_contract_calls,
@@ -271,7 +292,7 @@ class NewsImpactAnalyst:
             symbol=request.symbol,
             asset_class=request.asset_class,
             horizon=request.horizon,
-            news_events=_dedupe_news_events(collected_events),
+            news_events=relevant_events or _dedupe_news_events(collected_events),
             source_metadata={
                 "provider_mode": "live",
                 "tool_call_policy": "llm_planned_tool_calls_with_targeted_search_minimum",
@@ -310,7 +331,10 @@ class NewsImpactAnalyst:
             f"at most {max_tool_calls_by_name['get_news']} get_news calls, "
             f"and at most {max_tool_calls_by_name['get_global_news']} get_global_news calls.\n"
             "Include a direct instrument-specific get_news query unless the instrument is invalid. "
-            "For crypto SWAP instruments, include both exact instrument context and underlying asset news when useful.\n\n"
+            "For crypto SWAP instruments, include both exact instrument context and underlying asset news when useful. "
+            "Prefer queries that can surface direct instrument, underlying asset, ETF/flow, regulatory, rates, dollar, "
+            "liquidity, derivatives, exchange, and market-structure evidence. Avoid broad generic corporate-news queries "
+            "unless the transmission channel to the instrument is explicit.\n\n"
             f"Pydantic JSON schema:\n{json.dumps(NewsToolPlan.model_json_schema(), ensure_ascii=False, default=str)}\n\n"
             f"Candidate output JSON:\n{json.dumps(default_plan.model_dump(mode='json'), ensure_ascii=False, default=str)}"
         )
@@ -398,6 +422,12 @@ class SentimentAnalyst:
                 "symbol": data.symbol,
                 "asset_class": data.asset_class,
                 "sentiment_inputs": [item.model_dump(mode="json") for item in data.sentiment_inputs[:20]],
+                "structured_sentiment_blocks": _sentiment_source_blocks(data.sentiment_inputs),
+                "instruction": (
+                    "Read sentiment as pre-collected source blocks. Distinguish institutional/news framing, retail "
+                    "posts, community discussion, sponsored material, and generic market chatter. Weight sample size, "
+                    "source quality, and direct relevance to the instrument before selecting evidence."
+                ),
             },
             SentimentResult,
             fallback,
@@ -506,6 +536,10 @@ class ConstructiveCaseAnalyst:
                 "news": news.model_dump(mode="json"),
                 "sentiment": sentiment.model_dump(mode="json"),
                 "technical": technical.model_dump(mode="json"),
+                "instruction": (
+                    "Build the strongest constructive research case, but do not cite weak or unrelated evidence. "
+                    "Address risk evidence directly and state conditions that would keep the constructive case valid."
+                ),
             },
             ResearchCase,
             fallback,
@@ -553,8 +587,49 @@ class RiskCaseAnalyst:
                 "sentiment": sentiment.model_dump(mode="json"),
                 "technical": technical.model_dump(mode="json"),
                 "bull_researcher": constructive.model_dump(mode="json"),
+                "instruction": (
+                    "Challenge the constructive case using direct risks, evidence quality issues, data gaps, and "
+                    "technical invalidation conditions. Do not overstate unsupported downside claims."
+                ),
             },
             ResearchCase,
+            fallback,
+        )
+
+
+class DebateModerator:
+    name = "bull_bear_research_debate"
+
+    def run(self, constructive: ResearchCase, risk: ResearchCase, llm: LLMClient) -> ResearchDebateResult:
+        shared_evidence = sorted(set(constructive.evidence).intersection(risk.evidence))
+        fallback = ResearchDebateResult(
+            points_of_agreement=shared_evidence,
+            key_tensions=[
+                "constructive case requires confirmation from support, catalyst quality, and macro conditions",
+                "risk case emphasizes repricing, volatility, evidence gaps, and data coverage uncertainty",
+            ],
+            evidence_quality_notes=[
+                "direct instrument evidence should be weighted above broad market or sector proxies",
+                "low-relevance news should not be promoted into final key drivers or key risks",
+            ],
+            reporter_handoff=(
+                "Produce balanced research context only. Weigh direct evidence, technical confirmation, data gaps, "
+                "and news/sentiment noise before assigning directional_view."
+            ),
+            confidence=round((constructive.confidence + risk.confidence) / 2, 2),
+        )
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "bull_researcher": constructive.model_dump(mode="json"),
+                "bear_researcher": risk.model_dump(mode="json"),
+                "instruction": (
+                    "Moderate the debate. Identify agreements, tensions, evidence-quality concerns, and reporter "
+                    "handoff. Do not make a trade recommendation or mention order execution."
+                ),
+            },
+            ResearchDebateResult,
             fallback,
         )
 
@@ -571,6 +646,7 @@ class ResearchReporter:
         technical: TechnicalState,
         constructive: ResearchCase,
         risk: ResearchCase,
+        research_debate: dict[str, Any],
         warnings: list[str],
         llm: LLMClient,
     ) -> FinalResearchContext:
@@ -638,7 +714,12 @@ class ResearchReporter:
                 "technical": technical.model_dump(mode="json"),
                 "bull_researcher": constructive.model_dump(mode="json"),
                 "bear_researcher": risk.model_dump(mode="json"),
+                "research_debate": research_debate,
                 "warnings": warnings,
+                "instruction": (
+                    "Use the debate handoff and evidence-quality notes when assigning directional_view and risk_level. "
+                    "If direct evidence is thin or sentiment/news is noisy, explicitly discount confidence."
+                ),
             },
             FinalResearchContext,
             fallback,
@@ -657,10 +738,10 @@ def _llm_structured(
     user_prompt = (
         f"Agent: {agent_name}\n"
         f"Output schema name: {schema_model.__name__}\n"
-        "Return exactly one JSON object matching this Pydantic JSON schema. "
-        "Use the candidate output as the default answer, but refine interpretation when the provided evidence supports it. "
-        "Do not add fields outside the schema. Do not use buy/sell/order/position-sizing/profit-guarantee language. "
-        "For deterministic numeric fields, preserve the candidate values exactly unless the schema field is interpretive text.\n\n"
+        f"{STRUCTURED_JSON_RULES} "
+        "Use the candidate output as the conservative baseline, but refine interpretation when the provided evidence supports it. "
+        "For deterministic numeric fields, preserve the candidate values exactly unless the schema field is interpretive text. "
+        "If evidence is weak, keep confidence lower and name the data gap in an existing summary/evidence field.\n\n"
         f"Pydantic JSON schema:\n{json.dumps(schema_model.model_json_schema(), ensure_ascii=False, default=str)}\n\n"
         f"Allowed inputs:\n{json.dumps(contract.allowed_inputs, ensure_ascii=False)}\n\n"
         f"Allowed tools:\n{json.dumps(contract.allowed_tools, ensure_ascii=False)}\n\n"
@@ -808,6 +889,84 @@ def _instrument_related_news_events(events: list[NewsEvent], request: RunRequest
         if any(token in haystack for token in tokens):
             related.append(event)
     return related
+
+
+def _filter_relevant_news_events(events: list[NewsEvent], request: RunRequest) -> tuple[list[NewsEvent], list[dict[str, Any]]]:
+    deduped = _dedupe_news_events(events)
+    ranked: list[dict[str, Any]] = []
+    relevant: list[NewsEvent] = []
+    for event in deduped:
+        relevance, reason = _news_relevance(event, request)
+        ranked.append(
+            {
+                "title": event.title,
+                "source": event.source,
+                "published_at": event.published_at.isoformat(),
+                "relevance": relevance,
+                "reason": reason,
+                "url": event.url,
+            }
+        )
+        if relevance != "low":
+            relevant.append(event)
+    order = {"direct": 0, "macro": 1, "indirect": 2, "low": 3}
+    ranked.sort(key=lambda item: (order.get(str(item["relevance"]), 9), str(item["published_at"])), reverse=False)
+    relevant.sort(key=lambda event: order.get(_news_relevance(event, request)[0], 9))
+    return relevant, ranked
+
+
+def _news_relevance(event: NewsEvent, request: RunRequest) -> tuple[str, str]:
+    haystack = " ".join([event.title, event.summary or "", event.url or ""]).upper()
+    tokens = _instrument_query_tokens(request)
+    if any(token in haystack for token in tokens):
+        return "direct", "mentions the instrument, underlying asset, or known alias in title, summary, or URL"
+    macro_terms = {
+        "FED",
+        "FOMC",
+        "CPI",
+        "INFLATION",
+        "RATE",
+        "YIELD",
+        "DOLLAR",
+        "LIQUIDITY",
+        "TREASURY",
+        "ETF",
+        "REGULATION",
+        "SEC",
+        "GEOPOLITICAL",
+        "WAR",
+        "RISK APPETITE",
+        "FUNDING",
+        "OPEN INTEREST",
+    }
+    if any(term in haystack for term in macro_terms):
+        return "macro", "contains a macro, policy, liquidity, regulatory, or market-structure channel"
+    if request.asset_class == "equity" and any(term in haystack for term in {"EARNINGS", "GUIDANCE", "REVENUE", "MARGIN"}):
+        return "indirect", "contains equity fundamental context that may matter if tied to the issuer or sector"
+    if request.asset_class == "crypto" and any(term in haystack for term in {"CRYPTO", "BLOCKCHAIN", "MINING", "STABLECOIN"}):
+        return "indirect", "contains crypto-sector context without a direct instrument mention"
+    return "low", "no clear direct, macro, sector, or instrument transmission channel"
+
+
+def _sentiment_source_blocks(inputs: list[SentimentInput]) -> dict[str, Any]:
+    blocks: dict[str, list[dict[str, Any]]] = {
+        "news_or_search": [],
+        "stocktwits": [],
+        "reddit": [],
+        "other": [],
+    }
+    for item in inputs[:40]:
+        source = item.source.lower()
+        if "stocktwits" in source:
+            bucket = "stocktwits"
+        elif "reddit" in source:
+            bucket = "reddit"
+        elif any(token in source for token in ("tavily", "news", "yahoo", "finnhub")):
+            bucket = "news_or_search"
+        else:
+            bucket = "other"
+        blocks[bucket].append(item.model_dump(mode="json"))
+    return {key: {"count": len(value), "items": value[:12]} for key, value in blocks.items()}
 
 
 def _news_tool_specs() -> list[dict[str, Any]]:

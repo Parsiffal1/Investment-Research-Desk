@@ -4,6 +4,20 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from investment_research_desk.agents.prompts import (
+    ANALYST_TEAM_PROMPT,
+    BEAR_RESEARCHER_PROMPT,
+    BULL_RESEARCHER_PROMPT,
+    CACHE_WRITER_PROMPT,
+    DEBATE_MODERATOR_PROMPT,
+    FUNDAMENTAL_MACRO_PROMPT,
+    NEWS_IMPACT_PROMPT,
+    PERSISTENCE_PROMPT,
+    RESEARCH_REPORTER_PROMPT,
+    RUN_CONTROLLER_PROMPT,
+    SENTIMENT_PROMPT,
+    TECHNICAL_PROMPT,
+)
 
 AgentTeam = Literal["controller", "analyst", "research", "reporting", "cache"]
 
@@ -37,10 +51,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["run_metadata"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="WorkflowState",
-        system_prompt=(
-            "You are the run controller for Investment Research Desk. Initialize state, preserve user request "
-            "metadata, prepare fixture data or live-run seed context, and never produce market recommendations."
-        ),
+        system_prompt=RUN_CONTROLLER_PROMPT,
     ),
     "fundamental_macro": AgentContract(
         name="fundamental_macro",
@@ -50,11 +61,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["route_to_vendor.get_fundamentals", "route_to_vendor.get_news", "fundamental_metadata_reader", "macro_event_classifier"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="FundamentalMacroResult",
-        system_prompt=(
-            "You are a Fundamental/Macro Analyst. Use company profile, quote metadata, and macro/news context "
-            "to identify drivers, concerns, evidence, and confidence. Return structured JSON only. "
-            "Do not recommend trades, orders, or position sizes."
-        ),
+        system_prompt=FUNDAMENTAL_MACRO_PROMPT,
     ),
     "news_impact": AgentContract(
         name="news_impact",
@@ -70,11 +77,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         ],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="NewsImpactResult",
-        system_prompt=(
-            "You are a News/Macro Impact Analyst. Before tools are executed, first refine and optimize the exact "
-            "targeted and global news queries, inspect returned candidate evidence, reject low-relevance items, and return "
-            "one structured JSON object. Avoid buy/sell/order/position-size language."
-        ),
+        system_prompt=NEWS_IMPACT_PROMPT,
     ),
     "sentiment": AgentContract(
         name="sentiment",
@@ -84,11 +87,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["route_to_vendor.get_sentiment_inputs", "sentiment_term_scanner"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="SentimentResult",
-        system_prompt=(
-            "You are a Sentiment Analyst. Use only supplied sentiment inputs from routed sources such as "
-            "Tavily, StockTwits, and Reddit. Produce sentiment label, score, evidence, and confidence. "
-            "Do not infer execution decisions."
-        ),
+        system_prompt=SENTIMENT_PROMPT,
     ),
     "technical": AgentContract(
         name="technical",
@@ -111,11 +110,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         ],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="TechnicalState",
-        system_prompt=(
-            "You are a Technical Analyst. Use normalized OHLCV, deterministic indicator results, and public OKX "
-            "SWAP market context such as mark price, funding, open interest, price limits, and order book imbalance. "
-            "Describe trend, momentum, volatility, levels, and derivative market context as research context only."
-        ),
+        system_prompt=TECHNICAL_PROMPT,
     ),
     "analyst_team": AgentContract(
         name="analyst_team",
@@ -125,10 +120,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["schema_validator", "analyst_synthesis"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="analyst_team_outputs.json",
-        system_prompt=(
-            "You are the Analyst Team coordinator. Combine analyst outputs into a structured handoff. "
-            "Preserve disagreements and uncertainty."
-        ),
+        system_prompt=ANALYST_TEAM_PROMPT,
     ),
     "bull_researcher": AgentContract(
         name="bull_researcher",
@@ -138,10 +130,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["evidence_selector", "case_builder"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="ResearchCase",
-        system_prompt=(
-            "You are the Bull Researcher. Construct the strongest evidence-based supportive case from analyst outputs. "
-            "Frame it as scenario research, not a trading recommendation."
-        ),
+        system_prompt=BULL_RESEARCHER_PROMPT,
     ),
     "bear_researcher": AgentContract(
         name="bear_researcher",
@@ -151,10 +140,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["risk_evidence_selector", "case_challenger"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="ResearchCase",
-        system_prompt=(
-            "You are the Bear Researcher. Construct the strongest evidence-based risk case from analyst outputs "
-            "and challenge the constructive case. Stay within research context."
-        ),
+        system_prompt=BEAR_RESEARCHER_PROMPT,
     ),
     "bull_bear_research_debate": AgentContract(
         name="bull_bear_research_debate",
@@ -164,10 +150,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["debate_summarizer"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="research_debate.json",
-        system_prompt=(
-            "You are the Bull/Bear Research Debate moderator. Compare the two research cases, extract tensions, "
-            "and hand off balanced context to the reporter. Do not choose a trade."
-        ),
+        system_prompt=DEBATE_MODERATOR_PROMPT,
     ),
     "research_reporter": AgentContract(
         name="research_reporter",
@@ -177,10 +160,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["schema_validator", "guardrail_checker", "markdown_renderer"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="FinalResearchContext",
-        system_prompt=(
-            "You are the Research Reporter. Produce a balanced final research context from analyst and debate outputs. "
-            "Use clear uncertainty language and avoid execution instructions."
-        ),
+        system_prompt=RESEARCH_REPORTER_PROMPT,
     ),
     "final_market_context_cache": AgentContract(
         name="final_market_context_cache",
@@ -190,9 +170,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["cache_writer"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="final_market_context_cache.json",
-        system_prompt=(
-            "You are the final market context cache writer. Persist structured context and usage boundaries only."
-        ),
+        system_prompt=CACHE_WRITER_PROMPT,
     ),
     "persist": AgentContract(
         name="persist",
@@ -202,10 +180,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         allowed_tools=["json_writer", "markdown_writer", "metrics_writer"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="runs/{run_id}/artifact files",
-        system_prompt=(
-            "You are the persistence node. Write final artifacts exactly as structured outputs and preserve "
-            "guardrail warnings."
-        ),
+        system_prompt=PERSISTENCE_PROMPT,
     ),
 }
 

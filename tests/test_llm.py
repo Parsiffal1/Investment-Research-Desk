@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from investment_research_desk.agents import (
     ConstructiveCaseAnalyst,
+    DebateModerator,
     FundamentalMacroAnalyst,
     NewsImpactAnalyst,
     ResearchReporter,
@@ -24,7 +25,7 @@ def test_ollama_json_repair_path():
     assert client.chat_json("system", "user") == {"ok": True}
 
 
-def test_all_seven_analysis_agents_call_llm():
+def test_analysis_and_research_agents_call_llm():
     data = FixtureProvider().load("gold_cpi")
     llm = FakeLLMClient()
 
@@ -34,9 +35,21 @@ def test_all_seven_analysis_agents_call_llm():
     technical = TechnicalAnalyst().run(data, llm)
     bull = ConstructiveCaseAnalyst().run(fundamental, news, sentiment, technical, llm)
     bear = RiskCaseAnalyst().run(fundamental, news, sentiment, technical, bull, llm)
-    ResearchReporter().run(data, fundamental, news, sentiment, technical, bull, bear, [], llm)
+    debate = DebateModerator().run(bull, bear, llm)
+    ResearchReporter().run(
+        data,
+        fundamental,
+        news,
+        sentiment,
+        technical,
+        bull,
+        bear,
+        debate.model_dump(mode="json"),
+        [],
+        llm,
+    )
 
-    assert len(llm.calls) == 7
+    assert len(llm.calls) == 8
     called_agents = "\n".join(call["user"] for call in llm.calls)
     assert "Agent: fundamental_macro" in called_agents
     assert "Agent: news_impact" in called_agents
@@ -44,6 +57,7 @@ def test_all_seven_analysis_agents_call_llm():
     assert "Agent: technical" in called_agents
     assert "Agent: bull_researcher" in called_agents
     assert "Agent: bear_researcher" in called_agents
+    assert "Agent: bull_bear_research_debate" in called_agents
     assert "Agent: research_reporter" in called_agents
     assert "indicator_results" in called_agents
 

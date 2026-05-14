@@ -11,6 +11,7 @@ from langgraph.graph import END, START, StateGraph
 
 from investment_research_desk.agents import (
     ConstructiveCaseAnalyst,
+    DebateModerator,
     FundamentalMacroAnalyst,
     NewsImpactAnalyst,
     ResearchReporter,
@@ -459,9 +460,11 @@ class ResearchWorkflow:
 
     def _bull_bear_research_debate(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
+            request = RunRequest.model_validate(s["request"])
+            llm = self._make_llm(request, s)
             constructive = ResearchCase.model_validate(s["constructive"])
             risk = ResearchCase.model_validate(s["risk"])
-            shared_evidence = sorted(set(constructive.evidence).intersection(risk.evidence))
+            moderation = DebateModerator().run(constructive, risk, llm)
             debate = {
                 "team": "Bull/Bear Research Debate",
                 "contract": get_agent_contract("bull_bear_research_debate").model_dump(mode="json"),
@@ -479,15 +482,11 @@ class ResearchWorkflow:
                     "conditions": risk.conditions,
                     "confidence": risk.confidence,
                 },
-                "points_of_agreement": shared_evidence,
-                "key_tensions": [
-                    "constructive case requires confirmation from support and macro conditions",
-                    "risk case emphasizes repricing, volatility, and data coverage uncertainty",
-                ],
-                "reporter_handoff": (
-                    "Produce balanced research context only. Avoid buy/sell wording, order language, "
-                    "position sizing, and profitability claims."
-                ),
+                "points_of_agreement": moderation.points_of_agreement,
+                "key_tensions": moderation.key_tensions,
+                "evidence_quality_notes": moderation.evidence_quality_notes,
+                "reporter_handoff": moderation.reporter_handoff,
+                "confidence": moderation.confidence,
             }
             s["research_debate"] = debate
             self.store.write_json(s["run_id"], "research_debate.json", debate)
@@ -514,6 +513,7 @@ class ResearchWorkflow:
                 technical,
                 constructive,
                 risk,
+                s.get("research_debate", {}),
                 list(s.get("warnings", [])),
                 llm,
             )

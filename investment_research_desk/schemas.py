@@ -130,6 +130,14 @@ class ResearchCase(BaseModel):
     confidence: float = Field(ge=0, le=1)
 
 
+class ResearchDebateResult(BaseModel):
+    points_of_agreement: list[str] = Field(default_factory=list)
+    key_tensions: list[str] = Field(default_factory=list)
+    evidence_quality_notes: list[str] = Field(default_factory=list)
+    reporter_handoff: str
+    confidence: float = Field(ge=0, le=1)
+
+
 class FinalResearchContext(BaseModel):
     symbol: str
     asset_class: AssetClass
