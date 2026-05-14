@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import time
+from collections import deque
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 import questionary
@@ -10,9 +12,12 @@ import typer
 from rich import box
 from rich.align import Align
 from rich.console import Console
+from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.table import Table
+from rich.text import Text
 
 from investment_research_desk import __version__
 from investment_research_desk.cli_contract import (
@@ -31,6 +36,7 @@ from investment_research_desk.cli_contract import (
 from investment_research_desk.config import load_settings
 from investment_research_desk.eval import run_eval_suite
 from investment_research_desk.graph import ResearchWorkflow
+from investment_research_desk.graph.workflow import render_markdown_report
 from investment_research_desk.llm import OllamaLLMClient
 from investment_research_desk.persistence import RunStore
 from investment_research_desk.schemas import FinalResearchContext
@@ -44,6 +50,103 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Configuration and runtime checks")
 app.add_typer(config_app, name="config")
+
+
+CLI_STYLE = questionary.Style(
+    [
+        ("qmark", "fg:#6ee7b7 bold"),
+        ("question", "fg:#e5e7eb bold"),
+        ("answer", "fg:#facc15 bold"),
+        ("pointer", "fg:#a78bfa bold"),
+        ("highlighted", "fg:#a78bfa bold"),
+        ("selected", "fg:#6ee7b7"),
+        ("separator", "fg:#64748b"),
+        ("instruction", "fg:#94a3b8"),
+        ("text", "fg:#e5e7eb"),
+    ]
+)
+
+ASCII_LOGO = r"""
+    ____                 __                      __     ____                 __
+   /  _/___ _   _____  / /____  _________ ___  / /_   / __ \___  _________/ /__
+   / // __ \ | / / _ \/ __/ _ \/ ___/ __ `__ \/ __/  / / / / _ \/ ___/ __  / _ \
+ _/ // / / / |/ /  __/ /_/  __(__  ) / / / / / /_   / /_/ /  __(__  ) /_/ /  __/
+/___/_/ /_/|___/\___/\__/\___/____/_/ /_/ /_/\__/  /_____/\___/____/\__,_/\___/
+"""
+
+AGENT_TEAMS = {
+    "Run Control": ["run_controller", "data_ingestion"],
+    "Analyst Team": ["fundamental_macro", "news_impact", "sentiment", "technical"],
+    "Bull/Bear Research Debate": ["bull_researcher", "bear_researcher", "bull_bear_research_debate"],
+    "Research Reporter": ["research_reporter", "final_market_context_cache", "persist"],
+}
+
+AGENT_LABELS = {
+    "run_controller": "Run Controller",
+    "data_ingestion": "Data Ingestion",
+    "fundamental_macro": "Fundamental / Macro Analyst",
+    "news_impact": "News / Macro Impact Analyst",
+    "sentiment": "Sentiment Analyst",
+    "technical": "Technical Analyst",
+    "analyst_team": "Analyst Team Synthesis",
+    "bull_researcher": "Bull Researcher",
+    "bear_researcher": "Bear Researcher",
+    "bull_bear_research_debate": "Research Debate",
+    "research_reporter": "Research Reporter",
+    "final_market_context_cache": "Market Context Cache",
+    "persist": "Persist Artifacts",
+}
+
+
+class CLIRunDashboard:
+    def __init__(self, request) -> None:
+        self.request = request
+        self.started = time.perf_counter()
+        self.statuses = {agent: "pending" for agents in AGENT_TEAMS.values() for agent in agents}
+        self.messages: deque[tuple[str, str, str]] = deque(maxlen=80)
+        self.tool_calls = 0
+        self.llm_reports = 0
+        self.current_report = "Waiting for analysis report..."
+
+    def add_message(self, message_type: str, content: str) -> None:
+        self.messages.append((datetime.now().strftime("%H:%M:%S"), message_type, content))
+
+    def handle_event(self, event: dict[str, Any]) -> None:
+        name = event["name"]
+        status = event["status"]
+        payload = event.get("payload") or {}
+        if name in self.statuses:
+            self.statuses[name] = "completed" if status == "completed" else status
+        if event["type"] == "agent_status":
+            self.add_message("System", f"{AGENT_LABELS.get(name, name)} {status}")
+            return
+        if event["type"] == "agent_result":
+            self.add_message("Reasoning", f"{AGENT_LABELS.get(name, name)} completed")
+            if name in {"fundamental_macro", "news_impact", "sentiment", "technical"}:
+                self.llm_reports += 1
+                self.current_report = _markdown_for_agent_result(name, payload.get("output") or {})
+                self._count_tool_calls(payload.get("data") or {})
+            elif event.get("state"):
+                self.current_report = _markdown_for_state_progress(name, event["state"])
+
+    def _count_tool_calls(self, data: dict[str, Any]) -> None:
+        metadata = data.get("source_metadata") if isinstance(data, dict) else {}
+        statuses = metadata.get("agent_tool_status") if isinstance(metadata, dict) else {}
+        self.tool_calls += _count_status_entries(statuses)
+
+    def render(self) -> Layout:
+        layout = Layout()
+        layout.split_column(Layout(name="header", size=5), Layout(name="main"), Layout(name="footer", size=3))
+        layout["main"].split_column(Layout(name="upper", ratio=2), Layout(name="report", ratio=3))
+        layout["upper"].split_row(Layout(name="progress", ratio=2), Layout(name="messages", ratio=3))
+        layout["header"].update(_runtime_header(self.request))
+        layout["progress"].update(_runtime_progress_panel(self.statuses))
+        layout["messages"].update(_runtime_messages_panel(self.messages))
+        layout["report"].update(Panel(Text(self.current_report, overflow="fold"), title="Current Report", border_style="green"))
+        elapsed = time.perf_counter() - self.started
+        footer = f"Tool Calls: {self.tool_calls} | Generated Reports: {self.llm_reports} | Elapsed: {int(elapsed // 60):02d}:{int(elapsed % 60):02d}"
+        layout["footer"].update(Panel(Align.center(footer), border_style="grey50"))
+        return layout
 
 
 @app.callback(invoke_without_command=True)
@@ -97,6 +200,7 @@ def _collect_interactive_contract() -> CLIInteractionContract:
     console.print(_welcome_panel())
     console.print(_workflow_panel())
 
+    console.print(_step_panel(1, "Workflow Action", "Choose whether to start research, resume, inspect runs, or check configuration."))
     action = _select(
         "Select action",
         [
@@ -109,17 +213,19 @@ def _collect_interactive_contract() -> CLIInteractionContract:
         ],
     )
     runs_dir = Path(
-        questionary.text("Runs directory", default=str(settings.runs_dir)).ask() or str(settings.runs_dir)
+        questionary.text("Runs directory", default=str(settings.runs_dir), style=CLI_STYLE).ask() or str(settings.runs_dir)
     )
 
     if action in {"config_check", "list_runs", "clear_checkpoints", "exit"}:
         return CLIInteractionContract(mode=action, request=None, checkpoint=False, resume_run_id=None, runs_dir=runs_dir)
 
     if action == "resume":
+        console.print(_step_panel(2, "Checkpoint", "Select a resumable run and continue from the last saved graph step."))
         run_id = _select_resume_run(runs_dir)
         checkpoint = _confirm("Continue saving checkpoints after resume?", default=True)
         return CLIInteractionContract(mode="resume", request=None, checkpoint=checkpoint, resume_run_id=run_id, runs_dir=runs_dir)
 
+    console.print(_step_panel(2, "Data Source", "Use stable fixture data for demos/tests, or live providers for a current research run."))
     data_mode = _select(
         "Select data mode",
         [
@@ -133,23 +239,30 @@ def _collect_interactive_contract() -> CLIInteractionContract:
     horizon: str | HorizonOption = HorizonOption.short_term
     if data_mode == "fixture":
         fixtures = discover_fixtures()
+        console.print(_step_panel(3, "Fixture Scenario", "Select a frozen scenario for repeatable local research.", "gold_cpi"))
         fixture = _select(
             "Select fixture",
             [questionary.Choice(name, name) for name in fixtures] or [questionary.Choice("gold_cpi", "gold_cpi")],
         )
     else:
+        console.print(_step_panel(3, "Instrument", "Enter the exact research symbol. Examples: NVDA, AAPL, BTC-USDT-SWAP.", "BTC-USDT-SWAP"))
         symbol = questionary.text(
             "Symbol",
             default="BTC-USDT-SWAP",
             validate=lambda value: bool(value.strip()) or "Symbol is required.",
+            style=CLI_STYLE,
         ).ask()
+        console.print(_step_panel(4, "Asset Class", "Select the asset class so providers, prompts, and validation use the right contract."))
         asset_class = _enum_select("Asset class", AssetClassOption, AssetClassOption.crypto)
+        console.print(_step_panel(5, "Research Horizon", "Select the time horizon for analysis framing and prompt context.", HorizonOption.short_term.value))
         horizon = _enum_select("Horizon", HorizonOption, HorizonOption.short_term)
 
+    console.print(_step_panel(6, "Research Depth", "Select how much reasoning/debate depth to request from the workflow.", ResearchDepthOption.standard.value))
     research_depth = _enum_select("Research depth", ResearchDepthOption, ResearchDepthOption.standard)
+    console.print(_step_panel(7, "LLM Provider", "Select the LLM runtime. Ollama with qwen3:8b remains the primary local path.", LLMProviderOption.auto.value))
     llm_provider = _enum_select("LLM provider", LLMProviderOption, LLMProviderOption.auto)
     default_model = settings.ollama_model if llm_provider in {LLMProviderOption.auto, LLMProviderOption.ollama} else ""
-    model = questionary.text("Model override", default=default_model).ask() or None
+    model = questionary.text("Model override", default=default_model, style=CLI_STYLE).ask() or None
     checkpoint = _confirm("Save checkpoints after graph steps?", default=True)
 
     try:
@@ -273,13 +386,25 @@ def _run_workflow(request, checkpoint: bool, resume: str | None, clear_checkpoin
         _preflight_llm(request.llm_provider, request.model, bool(request.fixture), settings)
         _print_request_review(request, checkpoint=checkpoint, runs_dir=store.base_dir, mode="fixture" if request.fixture else "live")
 
-    workflow = ResearchWorkflow(settings=settings, runs_dir=runs_dir)
+    dashboard = CLIRunDashboard(request)
+    dashboard.add_message("System", f"Selected symbol: {request.symbol}")
+    dashboard.add_message("System", f"Asset class: {request.asset_class}; horizon: {request.horizon}")
+    dashboard.add_message("System", f"Research depth: {request.research_depth}; provider: {request.llm_provider}")
+    live_holder: dict[str, Live] = {}
+
+    def progress_callback(event: dict[str, Any]) -> None:
+        dashboard.handle_event(event)
+        live = live_holder.get("live")
+        if live is not None:
+            live.update(dashboard.render())
+
+    workflow = ResearchWorkflow(settings=settings, runs_dir=runs_dir, progress_callback=progress_callback)
     console.print(_execution_contract_panel())
-    started = time.perf_counter()
     try:
-        with Live(_running_table(started), console=console, refresh_per_second=4, transient=True) as live:
+        with Live(dashboard.render(), console=console, refresh_per_second=4, transient=False) as live:
+            live_holder["live"] = live
             state = workflow.run(request, checkpoint=checkpoint, resume_run_id=resume)
-            live.update(_running_table(started, completed=True))
+            live.update(dashboard.render())
     except Exception as exc:
         _exit_with_error(
             "Research workflow failed.",
@@ -383,12 +508,17 @@ def config_check() -> None:
 
 
 def _welcome_panel() -> Panel:
+    content = (
+        f"[dim]{ASCII_LOGO}[/dim]\n"
+        "[bold green]Investment Research Desk / 投研策略台[/bold green]\n\n"
+        "[bold]Workflow Steps:[/bold]\n"
+        "I. Analyst Team -> II. Bull/Bear Research Debate -> III. Research Reporter -> IV. final_market_context_cache\n\n"
+        "[dim]Local CLI frontend for structured investment research context. No trading execution, orders, or position sizing.[/dim]"
+    )
     return Panel(
-        Align.center(
-            "[bold]Investment Research Desk / 投研策略台[/bold]\n"
-            "[dim]CLI multi-agent research context system, not a trading execution system.[/dim]"
-        ),
-        title="Welcome",
+        Align.center(content),
+        title="Welcome to Investment Research Desk",
+        subtitle="Multi-Agent Investment Research Framework",
         border_style="green",
     )
 
@@ -402,6 +532,129 @@ def _workflow_panel() -> Panel:
     table.add_row("III.", "Research Reporter: structured context, brief, trace, metrics")
     table.add_row("IV.", "final_market_context_cache: downstream research context only")
     return Panel(table, title="Workflow", border_style="cyan")
+
+
+def _step_panel(step: int, title: str, prompt: str, default: str | None = None) -> Panel:
+    body = f"[bold]Step {step}: {title}[/bold]\n[dim]{prompt}[/dim]"
+    if default:
+        body += f"\n[dim]Default: {default}[/dim]"
+    return Panel(body, border_style="bright_blue", padding=(1, 2))
+
+
+def _runtime_header(request) -> Panel:
+    subtitle = "Multi-agent investment research context system - CLI Frontend"
+    body = (
+        f"[bold green]{request.symbol}[/bold green] "
+        f"[dim]| {request.asset_class} | {request.horizon} | {request.llm_provider}:{request.model or 'default'}[/dim]\n"
+        f"[green]{subtitle}[/green]"
+    )
+    return Panel(Align.center(body), title="Investment Research Desk / Touyan Celue Tai", border_style="green")
+
+
+def _runtime_progress_panel(statuses: dict[str, str]) -> Panel:
+    table = Table(show_header=True, header_style="bold magenta", box=box.SIMPLE_HEAD, expand=True)
+    table.add_column("Team", style="cyan", justify="center", ratio=2)
+    table.add_column("Agent", style="green", ratio=3)
+    table.add_column("Status", justify="center", ratio=2)
+    for team, agents in AGENT_TEAMS.items():
+        for index, agent in enumerate(agents):
+            status = statuses.get(agent, "pending")
+            if status == "in_progress":
+                status_cell = Spinner("dots", text="[blue]in_progress[/blue]", style="cyan")
+            else:
+                color = {"pending": "yellow", "completed": "green", "failed": "red"}.get(status, "white")
+                status_cell = f"[{color}]{status}[/{color}]"
+            table.add_row(team if index == 0 else "", AGENT_LABELS.get(agent, agent), status_cell)
+        table.add_row("", "", "", style="dim")
+    return Panel(table, title="Progress", border_style="cyan")
+
+
+def _runtime_messages_panel(messages: deque[tuple[str, str, str]]) -> Panel:
+    table = Table(show_header=True, header_style="bold magenta", box=box.MINIMAL, show_lines=True, expand=True)
+    table.add_column("Time", style="cyan", width=8, justify="center")
+    table.add_column("Type", style="green", width=10, justify="center")
+    table.add_column("Content", ratio=1)
+    for timestamp, message_type, content in list(messages)[-12:]:
+        if len(content) > 180:
+            content = content[:177] + "..."
+        table.add_row(timestamp, message_type, Text(content, overflow="fold"))
+    return Panel(table, title="Messages & Tools", border_style="blue")
+
+
+def _markdown_for_agent_result(agent_name: str, output: dict[str, Any]) -> str:
+    if agent_name == "fundamental_macro":
+        return (
+            "## Fundamental / Macro Analyst\n"
+            f"- View: {output.get('fundamental_view', 'unknown')}\n"
+            f"- Confidence: {output.get('confidence', 'unknown')}\n\n"
+            f"### Key Drivers\n{_markdown_list(output.get('key_drivers'))}\n\n"
+            f"### Concerns\n{_markdown_list(output.get('concerns'))}\n\n"
+            f"### Evidence\n{_markdown_list(output.get('evidence'))}"
+        )
+    if agent_name == "news_impact":
+        return (
+            "## News / Macro Impact Analyst\n"
+            f"- Impact logic: {output.get('impact_logic', 'unknown')}\n"
+            f"- Confidence: {output.get('confidence', 'unknown')}\n\n"
+            f"### Dominant Events\n{_markdown_list(output.get('dominant_events'))}\n\n"
+            f"### Evidence\n{_markdown_list(output.get('evidence'))}"
+        )
+    if agent_name == "sentiment":
+        return (
+            "## Sentiment Analyst\n"
+            f"- Mood: {output.get('crowd_mood', 'unknown')}\n"
+            f"- Label: {output.get('sentiment_label', 'unknown')}\n"
+            f"- Score: {output.get('sentiment_score', 'unknown')}\n"
+            f"- Confidence: {output.get('confidence', 'unknown')}\n\n"
+            f"### Evidence\n{_markdown_list(output.get('evidence'))}"
+        )
+    if agent_name == "technical":
+        return (
+            "## Technical Analyst\n"
+            f"- View: {output.get('technical_view', 'unknown')}\n"
+            f"- Trend: {output.get('trend', 'unknown')}\n"
+            f"- Momentum: {output.get('momentum', 'unknown')}\n"
+            f"- Volatility regime: {output.get('volatility_regime', 'unknown')}\n"
+            f"- RSI 14: {output.get('rsi_14', 'unknown')}\n"
+            f"- MACD: {output.get('macd_state', 'unknown')}\n"
+            f"- Support zones: {', '.join(map(str, output.get('support_zones') or [])) or 'None'}\n"
+            f"- Resistance zones: {', '.join(map(str, output.get('resistance_zones') or [])) or 'None'}"
+        )
+    return f"## {AGENT_LABELS.get(agent_name, agent_name)}\nCompleted."
+
+
+def _markdown_for_state_progress(node_name: str, state: dict[str, Any]) -> str:
+    if node_name == "bull_researcher" and state.get("constructive"):
+        item = state["constructive"]
+        return f"## Bull Researcher\n### Thesis\n{item.get('thesis')}\n\n### Evidence\n{_markdown_list(item.get('evidence'))}"
+    if node_name == "bear_researcher" and state.get("risk"):
+        item = state["risk"]
+        return f"## Bear Researcher\n### Thesis\n{item.get('thesis')}\n\n### Evidence\n{_markdown_list(item.get('evidence'))}"
+    if node_name == "research_reporter" and state.get("final_context"):
+        final = state["final_context"]
+        return (
+            "## Research Reporter\n"
+            f"- Balanced view: {final.get('balanced_view')}\n"
+            f"- Risk level: {final.get('risk_level')}\n"
+            f"- Confidence: {final.get('confidence')}\n\n"
+            f"### Key Drivers\n{_markdown_list(final.get('key_drivers'))}\n\n"
+            f"### Key Risks\n{_markdown_list(final.get('key_risks'))}"
+        )
+    return f"## {AGENT_LABELS.get(node_name, node_name)}\nCompleted."
+
+
+def _markdown_list(items: Any) -> str:
+    if not items:
+        return "- None"
+    return "\n".join(f"- {item}" for item in items)
+
+
+def _count_status_entries(value: Any) -> int:
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, dict):
+        return sum(_count_status_entries(item) for item in value.values()) or len(value)
+    return 0
 
 
 def _execution_contract_panel() -> Panel:
@@ -443,7 +696,13 @@ def _running_table(started: float, completed: bool = False) -> Panel:
 
 def _print_run_summary(state: dict) -> None:
     final = FinalResearchContext.model_validate(state["final_context"])
-    console.print(Panel.fit(f"{final.symbol} | {final.balanced_view} | risk={final.risk_level}", title="Research Context"))
+    console.print(
+        Panel(
+            Text(render_markdown_report(state), overflow="fold"),
+            title=f"Research Context Report | {final.symbol} | {final.balanced_view} | risk={final.risk_level}",
+            border_style="green",
+        )
+    )
     table = Table(title="Agent Trace")
     table.add_column("Agent/Node")
     table.add_column("Status")
@@ -478,7 +737,7 @@ def _print_artifact_contract(state: dict) -> None:
 
 
 def _select(message: str, choices):
-    value = questionary.select(message, choices=choices).ask()
+    value = questionary.select(message, choices=choices, style=CLI_STYLE).ask()
     if value is None:
         raise typer.Exit(code=1)
     return value
@@ -493,7 +752,7 @@ def _enum_select(message: str, enum_type, default):
 
 
 def _confirm(message: str, default: bool) -> bool:
-    value = questionary.confirm(message, default=default).ask()
+    value = questionary.confirm(message, default=default, style=CLI_STYLE).ask()
     if value is None:
         raise typer.Exit(code=1)
     return bool(value)

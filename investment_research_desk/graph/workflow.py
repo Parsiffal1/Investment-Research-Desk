@@ -5,7 +5,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -74,10 +74,16 @@ class ParallelAgentError(RuntimeError):
 
 
 class ResearchWorkflow:
-    def __init__(self, settings: Settings | None = None, runs_dir: Path | None = None):
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        runs_dir: Path | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ):
         self.settings = settings or load_settings()
         self.store = RunStore(runs_dir or self.settings.runs_dir)
         self.fixture_provider = FixtureProvider()
+        self.progress_callback = progress_callback
         self.graph = self._build_graph()
 
     def run(self, request: RunRequest, checkpoint: bool = False, resume_run_id: str | None = None) -> WorkflowState:
@@ -277,6 +283,8 @@ class ResearchWorkflow:
         traces: list[AgentTrace] = []
         warnings: list[str] = []
         with ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="ird-analyst") as executor:
+            for name in jobs:
+                self._emit_progress("agent_status", name, "in_progress")
             futures = {executor.submit(self._run_parallel_agent, name, call): name for name, call in jobs.items()}
             for future in as_completed(futures):
                 name = futures[future]
@@ -285,9 +293,21 @@ class ResearchWorkflow:
                     outputs[name] = output
                     data_slices[name] = data_slice
                     traces.append(trace)
+                    self._emit_progress(
+                        "agent_result",
+                        name,
+                        "completed",
+                        payload={"output": output, "data": data_slice, "trace": trace.model_dump(mode="json")},
+                    )
                 except ParallelAgentError as exc:
                     warnings.append(f"{name} failed in parallel analyst layer: {exc}")
                     traces.append(exc.trace)
+                    self._emit_progress(
+                        "agent_status",
+                        name,
+                        "failed",
+                        payload={"warnings": exc.trace.warnings},
+                    )
                     raise
         order = ["fundamental_macro", "news_impact", "sentiment", "technical"]
         traces.sort(key=lambda trace: order.index(trace.name) if trace.name in order else len(order))
@@ -537,14 +557,13 @@ class ResearchWorkflow:
     def _persist(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             final = FinalResearchContext.model_validate(s["final_context"])
-            markdown = render_markdown_brief(final)
             trace = RunTrace.model_validate(s["trace"])
             trace.completed_at = datetime.now(timezone.utc)
             trace.warnings = list(dict.fromkeys(trace.warnings + s.get("warnings", [])))
             trace.completed_steps = s.get("completed_steps", [])
             raw_tokens = approximate_tokens({"data": s.get("data"), "analyst_outputs": s.get("fundamental")})
             final_tokens = approximate_tokens(final.model_dump(mode="json"))
-            violations = find_guardrail_violations(final.model_dump_json() + "\n" + markdown)
+            violations = find_guardrail_violations(final.model_dump_json() + "\n" + render_markdown_brief(final))
             metrics = RunMetrics(
                 total_latency_sec=round((trace.completed_at - trace.started_at).total_seconds(), 3),
                 raw_input_tokens=raw_tokens,
@@ -552,6 +571,8 @@ class ResearchWorkflow:
                 compression_ratio=compression_ratio(raw_tokens, final_tokens),
                 guardrail_violations=violations,
             )
+            s["metrics"] = metrics.model_dump(mode="json")
+            markdown = render_markdown_report(s)
             paths = dict(s.get("output_paths", {}))
             paths.update(
                 {
@@ -562,7 +583,6 @@ class ResearchWorkflow:
                 }
             )
             s["trace"] = trace.model_dump(mode="json")
-            s["metrics"] = metrics.model_dump(mode="json")
             s["output_paths"] = paths
             return s
 
@@ -571,9 +591,11 @@ class ResearchWorkflow:
     def _run_step(self, state: WorkflowState, step_name: str, work, checkpoint_after: bool = True) -> WorkflowState:
         completed = list(state.get("completed_steps", []))
         if step_name in completed:
+            self._emit_progress("agent_status", step_name, "completed", state=state, payload={"skipped": True})
             return state
         get_agent_contract(step_name)
         started = time.perf_counter()
+        self._emit_progress("agent_status", step_name, "in_progress", state=state)
         try:
             state = work(state)
             status = "success"
@@ -582,6 +604,7 @@ class ResearchWorkflow:
             status = "failed"
             warnings = [str(exc)]
             state["warnings"] = list(state.get("warnings", [])) + [f"{step_name} failed: {exc}"]
+            self._emit_progress("agent_status", step_name, "failed", state=state, payload={"warnings": warnings})
             raise
         finally:
             latency = round(time.perf_counter() - started, 4)
@@ -589,9 +612,37 @@ class ResearchWorkflow:
                 self._append_trace(state, AgentTrace(name=step_name, status=status, latency_sec=latency, warnings=warnings))
         completed.append(step_name)
         state["completed_steps"] = completed
+        self._emit_progress(
+            "agent_result",
+            step_name,
+            "completed",
+            state=state,
+            payload={"latency_sec": latency, "warnings": warnings},
+        )
         if checkpoint_after and state.get("checkpoint_enabled"):
             self.store.save_checkpoint(state["run_id"], self._checkpoint_state(state))
         return state
+
+    def _emit_progress(
+        self,
+        event_type: str,
+        name: str,
+        status: str,
+        state: WorkflowState | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if self.progress_callback is None:
+            return
+        self.progress_callback(
+            {
+                "type": event_type,
+                "name": name,
+                "status": status,
+                "state": state,
+                "payload": payload or {},
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     def _make_llm(self, request: RunRequest, state: WorkflowState):
         llm = self._make_llm_for_request(request)
@@ -752,6 +803,104 @@ def render_markdown_brief(final: FinalResearchContext) -> str:
         f"## Key Drivers\n\n{drivers}\n\n"
         f"## Key Risks\n\n{risks}\n"
     )
+
+
+def render_markdown_report(state: dict[str, Any]) -> str:
+    final = FinalResearchContext.model_validate(state["final_context"])
+    fundamental = FundamentalMacroResult.model_validate(state["fundamental"])
+    news = NewsImpactResult.model_validate(state["news"])
+    sentiment = SentimentResult.model_validate(state["sentiment"])
+    technical = TechnicalState.model_validate(state["technical"])
+    constructive = ResearchCase.model_validate(state["constructive"])
+    risk = ResearchCase.model_validate(state["risk"])
+    data = NormalizedData.model_validate(state["data"])
+    metrics = state.get("metrics") or {}
+
+    return "\n\n".join(
+        [
+            f"# Investment Research Desk Report: {final.symbol}",
+            (
+                "Use as research context only. This is not financial advice, an order instruction, "
+                "position sizing guidance, or a profitability claim."
+            ),
+            "## Executive Context\n"
+            f"- Asset class: {final.asset_class}\n"
+            f"- Horizon: {final.horizon}\n"
+            f"- Market regime: {final.market_regime}\n"
+            f"- Balanced view: {final.balanced_view}\n"
+            f"- Risk level: {final.risk_level}\n"
+            f"- Confidence: {final.confidence}",
+            "## Fundamental / Macro Analyst\n"
+            f"- View: {fundamental.fundamental_view}\n"
+            f"- Confidence: {fundamental.confidence}\n\n"
+            f"### Key Drivers\n{_md_list(fundamental.key_drivers)}\n\n"
+            f"### Concerns\n{_md_list(fundamental.concerns)}\n\n"
+            f"### Evidence\n{_md_list(fundamental.evidence)}",
+            "## News / Macro Impact Analyst\n"
+            f"- Impact logic: {news.impact_logic}\n"
+            f"- Confidence: {news.confidence}\n"
+            f"- Asset impact: {news.asset_impact.get(final.symbol, 'mixed')}\n\n"
+            f"### Dominant Events\n{_md_list(news.dominant_events)}\n\n"
+            f"### Evidence\n{_md_list(news.evidence)}",
+            "## Sentiment Analyst\n"
+            f"- Crowd mood: {sentiment.crowd_mood}\n"
+            f"- Label: {sentiment.sentiment_label}\n"
+            f"- Score: {sentiment.sentiment_score}\n"
+            f"- Confidence: {sentiment.confidence}\n\n"
+            f"### Evidence\n{_md_list(sentiment.evidence)}",
+            "## Technical Analyst\n"
+            f"- View: {technical.technical_view}\n"
+            f"- Trend: {technical.trend}\n"
+            f"- Momentum: {technical.momentum}\n"
+            f"- Volatility regime: {technical.volatility_regime}\n"
+            f"- RSI 14: {technical.rsi_14}\n"
+            f"- MACD state: {technical.macd_state}\n"
+            f"- ATR 14: {technical.atr_14}\n"
+            f"- Realized volatility: {technical.realized_volatility}\n"
+            f"- Max drawdown: {technical.max_drawdown}\n"
+            f"- Support zones: {', '.join(map(str, technical.support_zones)) or 'None'}\n"
+            f"- Resistance zones: {', '.join(map(str, technical.resistance_zones)) or 'None'}\n"
+            f"- Confidence: {technical.confidence}",
+            "## Bull / Constructive Researcher\n"
+            f"### Thesis\n{constructive.thesis}\n\n"
+            f"### Evidence\n{_md_list(constructive.evidence)}\n\n"
+            f"### Conditions\n{_md_list(constructive.conditions)}\n\n"
+            f"- Confidence: {constructive.confidence}",
+            "## Bear / Risk Researcher\n"
+            f"### Thesis\n{risk.thesis}\n\n"
+            f"### Evidence\n{_md_list(risk.evidence)}\n\n"
+            f"### Conditions\n{_md_list(risk.conditions)}\n\n"
+            f"- Confidence: {risk.confidence}",
+            "## Final Research Reporter\n"
+            f"### Fundamental Summary\n{final.fundamental_summary}\n\n"
+            f"### News Impact Summary\n{final.news_impact_summary}\n\n"
+            f"### Sentiment Summary\n{final.sentiment_summary}\n\n"
+            f"### Technical Summary\n{final.technical_summary}\n\n"
+            f"### Key Drivers\n{_md_list(final.key_drivers)}\n\n"
+            f"### Key Risks\n{_md_list(final.key_risks)}\n\n"
+            f"### Uncertainty Factors\n{_md_list(final.uncertainty_factors)}",
+            "## Data And Run Metadata\n"
+            f"- OHLCV bars: {len(data.ohlcv)}\n"
+            f"- News events: {len(data.news_events)}\n"
+            f"- Sentiment inputs: {len(data.sentiment_inputs)}\n"
+            f"- Provider mode: {data.source_metadata.get('provider_mode', 'unknown')}\n"
+            f"- Tool policy: {data.source_metadata.get('tool_call_policy', 'unknown')}\n"
+            f"- Guardrail violations: {_guardrail_summary(metrics)}",
+            f"## Usage Constraints\n{_md_list(final.usage_constraints)}",
+            f"## Downstream Context\n{final.downstream_agent_context}",
+        ]
+    )
+
+
+def _md_list(items: list[Any]) -> str:
+    return "\n".join(f"- {item}" for item in items) if items else "- None"
+
+
+def _guardrail_summary(metrics: dict[str, Any]) -> str:
+    if not metrics:
+        return "pending during report render"
+    violations = metrics.get("guardrail_violations", [])
+    return ", ".join(violations) if violations else "None"
 
 
 def _dedupe_news_events(events: list[NewsEvent]) -> list[NewsEvent]:
