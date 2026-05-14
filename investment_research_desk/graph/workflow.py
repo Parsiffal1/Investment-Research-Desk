@@ -322,7 +322,17 @@ class ResearchWorkflow:
             raise ParallelAgentError(f"{name} failed: {exc}", trace) from exc
 
     def _run_fundamental_agent(self, request: RunRequest, seed_data: NormalizedData):
-        data = self._agent_data("fundamental_macro", request, seed_data)
+        data = (
+            self._agent_data("fundamental_macro", request, seed_data)
+            if request.fixture
+            else self._run_agent_tool_loop(
+                "fundamental_macro",
+                request,
+                ["get_fundamentals", "get_news"],
+                required_tools=["get_fundamentals"],
+                max_rounds=4,
+            )
+        )
         result = FundamentalMacroAnalyst().run(data, self._make_llm_for_request(request))
         return result, data
 
@@ -331,22 +341,228 @@ class ResearchWorkflow:
             data = self._agent_data("news_impact", request, seed_data)
             result = NewsImpactAnalyst().run(data, self._make_llm_for_request(request))
             return result, data
-        result, data = NewsImpactAnalyst().run_with_tools(
+        data = self._run_agent_tool_loop(
+            "news_impact",
             request,
-            self._make_llm_for_request(request),
-            lambda method, tool_request: route_to_vendor(method, self.settings, tool_request),
+            ["get_news", "get_global_news"],
+            required_tools=["get_news"],
+            max_rounds=5,
         )
+        result = NewsImpactAnalyst().run(data, self._make_llm_for_request(request))
         return result, data
 
     def _run_sentiment_agent(self, request: RunRequest, seed_data: NormalizedData):
-        data = self._agent_data("sentiment", request, seed_data)
+        data = (
+            self._agent_data("sentiment", request, seed_data)
+            if request.fixture
+            else self._run_agent_tool_loop(
+                "sentiment",
+                request,
+                ["get_sentiment_inputs"],
+                required_tools=["get_sentiment_inputs"],
+                max_rounds=3,
+            )
+        )
         result = SentimentAnalyst().run(data, self._make_llm_for_request(request))
         return result, data
 
     def _run_technical_agent(self, request: RunRequest, seed_data: NormalizedData):
-        data = self._agent_data("technical", request, seed_data)
+        data = (
+            self._agent_data("technical", request, seed_data)
+            if request.fixture
+            else self._run_agent_tool_loop(
+                "technical",
+                request,
+                ["get_market_data", "get_swap_market_context"],
+                required_tools=["get_market_data"],
+                max_rounds=4,
+            )
+        )
         result = TechnicalAnalyst().run(data, self._make_llm_for_request(request))
         return result, data
+
+    def _run_agent_tool_loop(
+        self,
+        agent_name: str,
+        request: RunRequest,
+        tool_names: list[str],
+        required_tools: list[str],
+        max_rounds: int,
+    ) -> NormalizedData:
+        contract = get_agent_contract(agent_name)
+        llm = self._make_llm_for_request(request)
+        collected: dict[str, Any] = {
+            "ohlcv": [],
+            "news_events": [],
+            "sentiment_inputs": [],
+            "market_context": {},
+            "source_metadata": {},
+            "tool_status": {},
+            "warnings": [],
+            "tool_calls": [],
+            "contract_floor_calls": [],
+            "executed_tool_count": 0,
+            "max_tool_calls": max_rounds * max(1, len(tool_names)),
+            "executed_tool_counts": {},
+        }
+
+        def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            return self._execute_agent_tool(agent_name, request, name, arguments, collected)
+
+        prompt = self._agent_tool_loop_prompt(agent_name, request, tool_names)
+        try:
+            raw = llm.chat_tools_json(contract.system_prompt, prompt, self._tool_specs(tool_names), execute_tool, max_rounds=max_rounds)
+            collected["tool_calls"].extend(raw.get("_tool_calls", []))
+        except Exception as exc:
+            collected["warnings"].append(self._safe_warning(f"{agent_name} tool loop failed: {exc}"))
+
+        called = {call.get("name") for call in collected["tool_calls"] if isinstance(call, dict)}
+        for required in required_tools:
+            if required not in called:
+                payload = execute_tool(required, self._default_tool_arguments(required, request))
+                collected["contract_floor_calls"].append({"name": required, "arguments": self._default_tool_arguments(required, request), "result": payload})
+
+        return self._collected_tool_data(agent_name, request, collected)
+
+    def _execute_agent_tool(
+        self,
+        agent_name: str,
+        request: RunRequest,
+        name: str,
+        arguments: dict[str, Any],
+        collected: dict[str, Any],
+    ) -> dict[str, Any]:
+        if collected["executed_tool_count"] >= collected["max_tool_calls"]:
+            return {"error": f"tool call budget exceeded for {agent_name}: max={collected['max_tool_calls']}"}
+        per_tool_counts = collected["executed_tool_counts"]
+        if per_tool_counts.get(name, 0) >= 4:
+            return {"error": f"tool call budget exceeded for {agent_name}.{name}: max=4"}
+        collected["executed_tool_count"] += 1
+        per_tool_counts[name] = per_tool_counts.get(name, 0) + 1
+        query = str(arguments.get("query") or request.symbol).strip() or request.symbol
+        symbol = str(arguments.get("symbol") or request.symbol).strip() or request.symbol
+        local_symbol = query if name in {"get_news", "get_global_news"} else symbol
+        local_request = request.model_copy(update={"symbol": local_symbol})
+        result = route_to_vendor(name, self.settings, local_request)
+        collected["tool_status"][name] = result.status
+        collected["warnings"].extend(result.warnings)
+        if name in {"get_news", "get_global_news"}:
+            events = [event for event in result.data if isinstance(event, NewsEvent)]
+            collected["news_events"].extend(events)
+            return {"status": result.status, "warnings": result.warnings, "events": [event.model_dump(mode="json") for event in events[:12]]}
+        if name == "get_sentiment_inputs":
+            inputs = result.data if isinstance(result.data, list) else []
+            collected["sentiment_inputs"].extend(inputs)
+            return {"status": result.status, "warnings": result.warnings, "sentiment_inputs": [item.model_dump(mode="json") for item in inputs[:12]]}
+        if name == "get_market_data":
+            collected["ohlcv"] = result.data if isinstance(result.data, list) else []
+            return {"status": result.status, "warnings": result.warnings, "bar_count": len(collected["ohlcv"])}
+        if name == "get_swap_market_context":
+            if result.data:
+                collected["market_context"]["okx_swap"] = result.data
+            return {"status": result.status, "warnings": result.warnings, "market_context": result.data}
+        if name == "get_fundamentals":
+            if isinstance(result.data, dict):
+                collected["source_metadata"].update(result.data)
+            return {"status": result.status, "warnings": result.warnings, "fundamentals": result.data}
+        return {"error": f"unsupported tool: {name}"}
+
+    def _collected_tool_data(self, agent_name: str, request: RunRequest, collected: dict[str, Any]) -> NormalizedData:
+        source_metadata = {
+            "provider_mode": "live",
+            "tool_call_policy": "tradingagents_style_llm_tool_loop",
+            "agent_tool_status": {agent_name: collected["tool_status"]},
+            "warnings": collected["warnings"],
+            "llm_tool_calls": collected["tool_calls"],
+            "contract_floor_calls": collected["contract_floor_calls"],
+            "tool_call_budget": {
+                "executed": collected["executed_tool_count"],
+                "max": collected["max_tool_calls"],
+                "per_tool": collected["executed_tool_counts"],
+            },
+            **collected["source_metadata"],
+        }
+        return NormalizedData(
+            symbol=request.symbol,
+            asset_class=request.asset_class,
+            horizon=request.horizon,
+            ohlcv=collected["ohlcv"],
+            news_events=_dedupe_news_events(collected["news_events"]),
+            sentiment_inputs=collected["sentiment_inputs"],
+            market_context=collected["market_context"],
+            source_metadata=source_metadata,
+        )
+
+    @staticmethod
+    def _agent_tool_loop_prompt(agent_name: str, request: RunRequest, tool_names: list[str]) -> str:
+        tool_lines = "\n".join(f"- {name}" for name in tool_names)
+        return (
+            f"Agent: {agent_name}\n"
+            f"Instrument: {request.symbol}\n"
+            f"Asset class: {request.asset_class}\n"
+            f"Horizon: {request.horizon}\n\n"
+            "Use the available tools to collect only the evidence this agent needs. "
+            "Before calling a tool, refine the query or symbol argument for this instrument. "
+            "Call tools only while they add useful evidence, then stop and return a compact JSON object with a summary. "
+            "Do not make financial advice, order, or position-size statements.\n\n"
+            f"Available tools:\n{tool_lines}"
+        )
+
+    @staticmethod
+    def _default_tool_arguments(name: str, request: RunRequest) -> dict[str, Any]:
+        if name in {"get_news", "get_global_news"}:
+            return {"query": request.symbol, "limit": 5}
+        return {"symbol": request.symbol}
+
+    @staticmethod
+    def _tool_specs(tool_names: list[str]) -> list[dict[str, Any]]:
+        specs = {
+            "get_market_data": {
+                "description": "Retrieve OHLCV bars for the exact market instrument.",
+                "properties": {"symbol": {"type": "string"}, "horizon": {"type": "string"}},
+                "required": ["symbol"],
+            },
+            "get_swap_market_context": {
+                "description": "Retrieve OKX public SWAP mark/index, funding, open interest, and orderbook context.",
+                "properties": {"symbol": {"type": "string"}},
+                "required": ["symbol"],
+            },
+            "get_news": {
+                "description": "Retrieve targeted symbol, issuer, asset, or sector news using a refined query.",
+                "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10}},
+                "required": ["query"],
+            },
+            "get_global_news": {
+                "description": "Retrieve broader macro, policy, liquidity, and cross-asset market news.",
+                "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10}},
+                "required": ["query"],
+            },
+            "get_sentiment_inputs": {
+                "description": "Retrieve search/social/commentary sentiment inputs for the instrument.",
+                "properties": {"symbol": {"type": "string"}, "query": {"type": "string"}},
+                "required": ["symbol"],
+            },
+            "get_fundamentals": {
+                "description": "Retrieve quote, profile, and company context for the instrument where available.",
+                "properties": {"symbol": {"type": "string"}},
+                "required": ["symbol"],
+            },
+        }
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": specs[name]["description"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": specs[name]["properties"],
+                        "required": specs[name]["required"],
+                    },
+                },
+            }
+            for name in tool_names
+        ]
 
     def _agent_data(self, agent_name: str, request: RunRequest, seed_data: NormalizedData) -> NormalizedData:
         if request.fixture:
@@ -462,12 +678,82 @@ class ResearchWorkflow:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
             llm = self._make_llm(request, s)
+            fundamental = FundamentalMacroResult.model_validate(s["fundamental"])
+            news = NewsImpactResult.model_validate(s["news"])
+            sentiment = SentimentResult.model_validate(s["sentiment"])
+            technical = TechnicalState.model_validate(s["technical"])
             constructive = ResearchCase.model_validate(s["constructive"])
             risk = ResearchCase.model_validate(s["risk"])
+            debate_rounds: list[dict[str, Any]] = [
+                {"round": 1, "speaker": "bull_researcher", "case": constructive.model_dump(mode="json")},
+                {"round": 1, "speaker": "bear_researcher", "case": risk.model_dump(mode="json")},
+            ]
+            max_rounds = self._debate_rounds(request)
+            for round_no in range(2, max_rounds + 1):
+                bull_started = time.perf_counter()
+                self._emit_progress("agent_status", f"bull_researcher_round_{round_no}", "in_progress", state=s)
+                constructive = ConstructiveCaseAnalyst().run(
+                    fundamental,
+                    news,
+                    sentiment,
+                    technical,
+                    llm,
+                    debate_history=debate_rounds,
+                    opponent_case=risk,
+                )
+                self._append_trace(
+                    s,
+                    AgentTrace(
+                        name=f"bull_researcher_round_{round_no}",
+                        status="success",
+                        latency_sec=round(time.perf_counter() - bull_started, 4),
+                    ),
+                )
+                self._emit_progress(
+                    "agent_result",
+                    f"bull_researcher_round_{round_no}",
+                    "completed",
+                    state=s,
+                    payload={"output": constructive.model_dump(mode="json")},
+                )
+                debate_rounds.append({"round": round_no, "speaker": "bull_researcher", "case": constructive.model_dump(mode="json")})
+
+                bear_started = time.perf_counter()
+                self._emit_progress("agent_status", f"bear_researcher_round_{round_no}", "in_progress", state=s)
+                risk = RiskCaseAnalyst().run(
+                    fundamental,
+                    news,
+                    sentiment,
+                    technical,
+                    constructive,
+                    llm,
+                    debate_history=debate_rounds,
+                )
+                self._append_trace(
+                    s,
+                    AgentTrace(
+                        name=f"bear_researcher_round_{round_no}",
+                        status="success",
+                        latency_sec=round(time.perf_counter() - bear_started, 4),
+                    ),
+                )
+                self._emit_progress(
+                    "agent_result",
+                    f"bear_researcher_round_{round_no}",
+                    "completed",
+                    state=s,
+                    payload={"output": risk.model_dump(mode="json")},
+                )
+                debate_rounds.append({"round": round_no, "speaker": "bear_researcher", "case": risk.model_dump(mode="json")})
+            s["constructive"] = constructive.model_dump(mode="json")
+            s["risk"] = risk.model_dump(mode="json")
+            self._write_bull_risk_outputs(s)
             moderation = DebateModerator().run(constructive, risk, llm)
             debate = {
                 "team": "Bull/Bear Research Debate",
                 "contract": get_agent_contract("bull_bear_research_debate").model_dump(mode="json"),
+                "round_count": max_rounds,
+                "rounds": debate_rounds,
                 "bull_researcher": {
                     "role": "constructive researcher",
                     "thesis": constructive.thesis,
@@ -493,6 +779,10 @@ class ResearchWorkflow:
             return s
 
         return self._run_step(state, "bull_bear_research_debate", work)
+
+    @staticmethod
+    def _debate_rounds(request: RunRequest) -> int:
+        return {"quick": 1, "standard": 2, "deep": 3}.get(request.research_depth, 2)
 
     def _research_reporter(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
@@ -565,7 +855,8 @@ class ResearchWorkflow:
             trace.completed_steps = s.get("completed_steps", [])
             raw_tokens = approximate_tokens({"data": s.get("data"), "analyst_outputs": s.get("fundamental")})
             final_tokens = approximate_tokens(final.model_dump(mode="json"))
-            violations = find_guardrail_violations(final.model_dump_json() + "\n" + render_markdown_brief(final))
+            markdown = render_markdown_report(s)
+            violations = find_guardrail_violations(final.model_dump_json() + "\n" + markdown)
             metrics = RunMetrics(
                 total_latency_sec=round((trace.completed_at - trace.started_at).total_seconds(), 3),
                 raw_input_tokens=raw_tokens,
@@ -574,7 +865,6 @@ class ResearchWorkflow:
                 guardrail_violations=violations,
             )
             s["metrics"] = metrics.model_dump(mode="json")
-            markdown = render_markdown_report(s)
             paths = dict(s.get("output_paths", {}))
             paths.update(
                 {
@@ -707,7 +997,11 @@ class ResearchWorkflow:
         ).market_context
         source_metadata: dict[str, Any] = {
             "provider_mode": seed_data.source_metadata.get("provider_mode", "live"),
-            "tool_call_policy": "analyst_agents_called_allowed_tools",
+            "tool_call_policy": (
+                "fixture_data_scoped_to_agent_contract"
+                if seed_data.source_metadata.get("provider_mode") == "fixture"
+                else "tradingagents_style_llm_tool_loop"
+            ),
             "agent_tool_status": {},
             "agent_tool_warnings": {},
         }
@@ -718,7 +1012,10 @@ class ResearchWorkflow:
                 source_metadata["agent_tool_warnings"][name] = warnings
             for key, value in data.source_metadata.items():
                 if key not in {"provider_mode", "tool_call_policy", "agent_tool_status", "warnings"}:
-                    source_metadata[key] = value
+                    if key in {"llm_tool_calls", "contract_floor_calls", "tool_call_budget"}:
+                        source_metadata.setdefault(key, {})[name] = value
+                    else:
+                        source_metadata[key] = value
         return NormalizedData(
             symbol=request.symbol,
             asset_class=request.asset_class,
@@ -823,6 +1120,7 @@ def render_markdown_report(state: dict[str, Any]) -> str:
     constructive = ResearchCase.model_validate(state["constructive"])
     risk = ResearchCase.model_validate(state["risk"])
     data = NormalizedData.model_validate(state["data"])
+    debate = state.get("research_debate") or {}
     metrics = state.get("metrics") or {}
 
     return "\n\n".join(
@@ -888,6 +1186,12 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"### Evidence\n{_md_list(risk.evidence)}\n\n"
             f"### Conditions\n{_md_list(risk.conditions)}\n\n"
             f"- Confidence: {risk.confidence}",
+            "## Bull / Bear Debate\n"
+            f"- Rounds: {debate.get('round_count', 1)}\n"
+            f"- Points of agreement: {_inline_list(debate.get('points_of_agreement', []))}\n"
+            f"- Key tensions: {_inline_list(debate.get('key_tensions', []))}\n"
+            f"- Evidence quality notes: {_inline_list(debate.get('evidence_quality_notes', []))}\n\n"
+            f"### Round Log\n{_debate_round_log(debate.get('rounds', []))}",
             "## Final Research Reporter\n"
             f"### Fundamental Summary\n{final.fundamental_summary}\n\n"
             f"### News Impact Summary\n{final.news_impact_summary}\n\n"
@@ -912,6 +1216,19 @@ def render_markdown_report(state: dict[str, Any]) -> str:
 
 def _md_list(items: list[Any]) -> str:
     return "\n".join(f"- {item}" for item in items) if items else "- None"
+
+
+def _inline_list(items: list[Any]) -> str:
+    return "; ".join(str(item) for item in items) if items else "None"
+
+
+def _debate_round_log(rounds: list[dict[str, Any]]) -> str:
+    rows: list[str] = []
+    for item in rounds:
+        case = item.get("case") if isinstance(item, dict) else {}
+        thesis = case.get("thesis") if isinstance(case, dict) else None
+        rows.append(f"- Round {item.get('round')}: {item.get('speaker')} - {thesis or 'No thesis recorded'}")
+    return "\n".join(rows) if rows else "- None"
 
 
 def _guardrail_summary(metrics: dict[str, Any]) -> str:

@@ -509,6 +509,8 @@ class ConstructiveCaseAnalyst:
         sentiment: SentimentResult,
         technical: TechnicalState,
         llm: LLMClient,
+        debate_history: list[dict[str, Any]] | None = None,
+        opponent_case: ResearchCase | None = None,
     ) -> ResearchCase:
         evidence = []
         evidence.extend(fundamental.key_drivers[:2])
@@ -536,6 +538,8 @@ class ConstructiveCaseAnalyst:
                 "news": news.model_dump(mode="json"),
                 "sentiment": sentiment.model_dump(mode="json"),
                 "technical": technical.model_dump(mode="json"),
+                "debate_history": debate_history or [],
+                "bear_researcher": opponent_case.model_dump(mode="json") if opponent_case else None,
                 "instruction": (
                     "Build the strongest constructive research case, but do not cite weak or unrelated evidence. "
                     "Address risk evidence directly and state conditions that would keep the constructive case valid."
@@ -557,6 +561,7 @@ class RiskCaseAnalyst:
         technical: TechnicalState,
         constructive: ResearchCase,
         llm: LLMClient,
+        debate_history: list[dict[str, Any]] | None = None,
     ) -> ResearchCase:
         evidence = []
         evidence.extend(fundamental.concerns[:3])
@@ -587,6 +592,7 @@ class RiskCaseAnalyst:
                 "sentiment": sentiment.model_dump(mode="json"),
                 "technical": technical.model_dump(mode="json"),
                 "bull_researcher": constructive.model_dump(mode="json"),
+                "debate_history": debate_history or [],
                 "instruction": (
                     "Challenge the constructive case using direct risks, evidence quality issues, data gaps, and "
                     "technical invalidation conditions. Do not overstate unsupported downside claims."
@@ -695,7 +701,7 @@ class ResearchReporter:
                 "does not include position sizing",
                 "does not claim profitability",
             ],
-            source_metadata=data.source_metadata,
+            source_metadata=_report_source_metadata(data.source_metadata),
             warnings=warnings,
         )
         return _llm_structured(
@@ -1153,6 +1159,42 @@ def _view_score(view: str) -> float:
     if view == "neutral_to_bearish":
         return -0.5
     return 0.0
+
+
+def _report_source_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    safe_keys = {
+        "provider_mode",
+        "tool_call_policy",
+        "agent_tool_status",
+        "agent_tool_warnings",
+        "minimum_targeted_search_enforced",
+        "filtered_candidate_count",
+        "tool_call_budget",
+    }
+    safe = {key: value for key, value in metadata.items() if key in safe_keys}
+    if "contract_floor_calls" in metadata:
+        safe["contract_floor_calls"] = _summarize_tool_calls(metadata["contract_floor_calls"])
+    if "llm_tool_calls" in metadata:
+        safe["llm_tool_calls"] = _summarize_tool_calls(metadata["llm_tool_calls"])
+    return safe
+
+
+def _summarize_tool_calls(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _summarize_tool_calls(item) for key, item in value.items()}
+    if isinstance(value, list):
+        summarized = []
+        for item in value:
+            if isinstance(item, dict):
+                summarized.append(
+                    {
+                        "name": item.get("name"),
+                        "arguments": item.get("arguments"),
+                        "has_result": "result" in item,
+                    }
+                )
+        return summarized
+    return value
 
 
 def _risk_level(risk: ResearchCase, technical: TechnicalState) -> str:

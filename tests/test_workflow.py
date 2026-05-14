@@ -44,6 +44,8 @@ def test_fixture_workflow_creates_artifacts(tmp_path: Path):
     assert "analyst_layer" not in trace_names
     assert "research_layer" not in trace_names
     assert state["analyst_team"]["execution_mode"] == "parallel_thread_pool"
+    assert state["research_debate"]["round_count"] == 2
+    assert len(state["research_debate"]["rounds"]) == 4
 
 
 def test_resume_from_checkpoint_completes(tmp_path: Path):
@@ -166,7 +168,12 @@ def test_live_analysts_call_their_own_dataflow_tools(tmp_path: Path, monkeypatch
     assert "get_fundamentals" in calls
     assert calls.count("get_news") >= 2
     assert "get_global_news" in calls
-    assert state["data"]["source_metadata"]["tool_call_policy"] == "analyst_agents_called_allowed_tools"
+    assert state["data"]["source_metadata"]["tool_call_policy"] == "tradingagents_style_llm_tool_loop"
+    assert "fundamental_macro" in state["data"]["source_metadata"]["llm_tool_calls"]
+    assert "news_impact" in state["data"]["source_metadata"]["llm_tool_calls"]
+    assert "sentiment" in state["data"]["source_metadata"]["llm_tool_calls"]
+    assert "technical" in state["data"]["source_metadata"]["llm_tool_calls"]
+    assert state["data"]["source_metadata"]["tool_call_budget"]["technical"]["executed"] <= state["data"]["source_metadata"]["tool_call_budget"]["technical"]["max"]
     assert state["data"]["source_metadata"]["agent_tool_status"]["technical"]["get_market_data"] == {"fake_market": "success"}
     assert state["data"]["source_metadata"]["agent_tool_status"]["technical"]["get_swap_market_context"] == {"fake_okx": "success"}
     assert state["technical"]["funding_rate"] == 0.0001
