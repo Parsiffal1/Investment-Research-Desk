@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel
@@ -140,16 +141,24 @@ class NewsImpactAnalyst:
         tool_status: dict[str, Any] = {}
         tool_warnings: list[str] = []
         tool_calls: list[dict[str, Any]] = []
+        forced_contract_calls: list[dict[str, Any]] = []
+        filtered_candidate_count = 0
+        max_total_tool_calls = 6
+        max_tool_calls_by_name = {"get_news": 4, "get_global_news": 2}
 
         def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             if name not in {"get_news", "get_global_news"}:
                 return {"error": f"unsupported tool: {name}"}
+            if len(tool_calls) >= max_total_tool_calls:
+                return {"error": f"tool call budget exceeded: max_total={max_total_tool_calls}"}
+            if _tool_call_count(tool_calls, name) >= max_tool_calls_by_name[name]:
+                return {"error": f"tool call budget exceeded for {name}: max={max_tool_calls_by_name[name]}"}
             query = str(arguments.get("query") or request.symbol).strip() or request.symbol
             local_request = request.model_copy(update={"symbol": query})
             result = route_tool(name, local_request)
             events = [event for event in result.data if isinstance(event, NewsEvent)]
             collected_events.extend(events)
-            tool_status[name] = result.status
+            tool_status.setdefault(name, []).append({"query": query, "status": result.status})
             tool_warnings.extend(result.warnings)
             payload = {
                 "query": query,
@@ -183,6 +192,11 @@ class NewsImpactAnalyst:
             "Available tools:\n"
             "- get_news(query, limit): targeted symbol/topic news search.\n"
             "- get_global_news(query, limit): broader macro/market news search.\n\n"
+            f"Hard tool budget: at most {max_total_tool_calls} calls total, "
+            f"at most {max_tool_calls_by_name['get_news']} get_news calls, "
+            f"and at most {max_tool_calls_by_name['get_global_news']} get_global_news calls.\n"
+            "Before concluding that instrument-specific news is insufficient, call get_news with the exact instrument "
+            "or a directly related asset/company query.\n\n"
             "Return exactly one JSON object matching this Pydantic JSON schema after you finish tool calls. "
             "Do not add fields outside the schema. Do not use buy/sell/order/position-sizing/profit-guarantee language.\n\n"
             f"Pydantic JSON schema:\n{json.dumps(NewsImpactResult.model_json_schema(), ensure_ascii=False, default=str)}\n\n"
@@ -200,6 +214,50 @@ class NewsImpactAnalyst:
             result = self._fallback(
                 NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon, news_events=collected_events)
             )
+        if not _has_targeted_news_call(tool_calls, request):
+            for query in _targeted_news_queries(request):
+                before_count = len(collected_events)
+                payload = execute_tool("get_news", {"query": query, "limit": 5, "forced_by_contract": True})
+                forced_contract_calls.append(
+                    {
+                        "name": "get_news",
+                        "arguments": {"query": query, "limit": 5},
+                        "forced_by_contract": True,
+                        "error": payload.get("error"),
+                    }
+                )
+                if len(collected_events) > before_count or not payload.get("error"):
+                    break
+        if forced_contract_calls:
+            all_events = _dedupe_news_events(collected_events)
+            related_events = _instrument_related_news_events(all_events, request)
+            filtered_candidate_count = len(all_events) - len(related_events or all_events)
+            refinement_data = NormalizedData(
+                symbol=request.symbol,
+                asset_class=request.asset_class,
+                horizon=request.horizon,
+                news_events=related_events or all_events,
+            )
+            result = _llm_structured(
+                self.name,
+                llm,
+                {
+                    "symbol": request.symbol,
+                    "asset_class": request.asset_class,
+                    "horizon": request.horizon,
+                    "news_events": [event.model_dump(mode="json") for event in refinement_data.news_events[:16]],
+                    "filtered_candidate_count": filtered_candidate_count,
+                    "llm_tool_calls": tool_calls,
+                    "forced_contract_calls": forced_contract_calls,
+                    "instruction": (
+                        "The system enforced the minimum targeted news-search contract because the first tool loop "
+                        "did not include a direct instrument-specific get_news call. Evaluate these candidate events, "
+                        "reject unrelated items, and only admit evidence with a clear link to the instrument."
+                    ),
+                },
+                NewsImpactResult,
+                self._fallback(refinement_data),
+            )
         data = NormalizedData(
             symbol=request.symbol,
             asset_class=request.asset_class,
@@ -207,10 +265,13 @@ class NewsImpactAnalyst:
             news_events=_dedupe_news_events(collected_events),
             source_metadata={
                 "provider_mode": "live",
-                "tool_call_policy": "llm_driven_tool_loop",
+                "tool_call_policy": "llm_driven_tool_loop_with_targeted_search_minimum",
+                "minimum_targeted_search_enforced": bool(forced_contract_calls),
+                "filtered_candidate_count": filtered_candidate_count,
                 "agent_tool_status": {self.name: tool_status},
                 "warnings": tool_warnings,
                 "llm_tool_calls": tool_calls,
+                "forced_contract_calls": forced_contract_calls,
             },
         )
         return result, data
@@ -547,6 +608,86 @@ def _preserve_deterministic_fields(agent_name: str, result: TModel, fallback: TM
             }
         )
     return result
+
+
+def _tool_call_count(tool_calls: list[dict[str, Any]], name: str) -> int:
+    return sum(1 for call in tool_calls if call.get("name") == name)
+
+
+def _has_targeted_news_call(tool_calls: list[dict[str, Any]], request: RunRequest) -> bool:
+    for call in tool_calls:
+        if call.get("name") != "get_news":
+            continue
+        arguments = call.get("arguments") or {}
+        query = str(arguments.get("query") or "")
+        if _query_mentions_instrument(query, request):
+            return True
+    return False
+
+
+def _query_mentions_instrument(query: str, request: RunRequest) -> bool:
+    normalized_query = query.upper()
+    return any(token in normalized_query for token in _instrument_query_tokens(request))
+
+
+def _instrument_query_tokens(request: RunRequest) -> list[str]:
+    symbol = request.symbol.upper()
+    ignored_parts = {"USD", "USDT", "USDC", "SWAP", "PERP", "PERPETUAL"}
+    parts = [part for part in re.split(r"[^A-Z0-9]+", symbol) if part and part not in ignored_parts]
+    tokens = [symbol, *parts]
+    aliases = {
+        "BTC": "BITCOIN",
+        "ETH": "ETHEREUM",
+        "SOL": "SOLANA",
+        "XAU": "GOLD",
+        "GC": "GOLD",
+        "NVDA": "NVIDIA",
+        "TSLA": "TESLA",
+        "AAPL": "APPLE",
+        "MSFT": "MICROSOFT",
+        "GOOG": "GOOGLE",
+        "GOOGL": "ALPHABET",
+        "AMZN": "AMAZON",
+        "META": "META",
+        "NFLX": "NETFLIX",
+        "AMD": "ADVANCED MICRO DEVICES",
+    }
+    for part in parts:
+        alias = aliases.get(part)
+        if alias:
+            tokens.append(alias)
+    return _dedupe(tokens)
+
+
+def _targeted_news_queries(request: RunRequest) -> list[str]:
+    symbol = request.symbol.upper()
+    parts = [part for part in re.split(r"[^A-Z0-9]+", symbol) if part]
+    queries = [request.symbol]
+    if request.asset_class == "crypto" and parts:
+        primary = parts[0]
+        crypto_names = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana"}
+        queries.append(f"{primary} {crypto_names.get(primary, primary)} crypto news")
+    elif request.asset_class in {"equity", "equity_index", "other"}:
+        queries.append(f"{symbol} stock company news")
+    else:
+        queries.append(f"{request.symbol} market news")
+    return _dedupe(queries)
+
+
+def _instrument_related_news_events(events: list[NewsEvent], request: RunRequest) -> list[NewsEvent]:
+    tokens = _instrument_query_tokens(request)
+    related: list[NewsEvent] = []
+    for event in events:
+        haystack = " ".join(
+            [
+                event.title,
+                event.summary or "",
+                event.url or "",
+            ]
+        ).upper()
+        if any(token in haystack for token in tokens):
+            related.append(event)
+    return related
 
 
 def _news_tool_specs() -> list[dict[str, Any]]:

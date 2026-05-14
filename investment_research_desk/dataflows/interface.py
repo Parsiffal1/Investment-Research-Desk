@@ -103,7 +103,12 @@ def _vendor_methods(settings: Settings) -> dict[str, dict[str, Callable[[RunRequ
     reddit = RedditProvider()
     return {
         "get_market_data": {"okx": okx.fetch_ohlcv, "fmp": fmp.fetch_ohlcv, "yahoo_finance": yahoo.fetch_ohlcv},
-        "get_news": {"jin10": jin10.fetch_news, "finnhub": finnhub.fetch_news, "yahoo_finance": yahoo.fetch_news},
+        "get_news": {
+            "jin10": jin10.fetch_news,
+            "finnhub": finnhub.fetch_news,
+            "yahoo_finance": yahoo.fetch_news,
+            "tavily": tavily.fetch_news_events,
+        },
         "get_global_news": {
             "jin10": jin10.fetch_global_news,
             "finnhub": finnhub.fetch_global_news,

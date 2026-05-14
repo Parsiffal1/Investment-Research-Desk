@@ -1,5 +1,6 @@
 from investment_research_desk.config import load_settings
 from investment_research_desk.dataflows import route_to_vendor
+from investment_research_desk.dataflows.interface import _vendor_methods
 from investment_research_desk.schemas import RunRequest
 
 
@@ -22,3 +23,8 @@ def test_fundamentals_route_returns_mapping_for_equity():
     assert isinstance(result.data, dict)
     assert "fmp" in result.status or "finnhub" in result.status
 
+
+def test_targeted_news_route_includes_tavily_fallback():
+    settings = load_settings()
+
+    assert "tavily" in _vendor_methods(settings)["get_news"]

@@ -72,5 +72,77 @@ def test_news_analyst_uses_llm_driven_tool_loop():
 
     assert result.dominant_events
     assert {method for method, _ in calls} == {"get_news", "get_global_news"}
-    assert data.source_metadata["tool_call_policy"] == "llm_driven_tool_loop"
+    assert ("get_news", "BTC-USDT-SWAP") in calls
+    assert data.source_metadata["tool_call_policy"] == "llm_driven_tool_loop_with_targeted_search_minimum"
+    assert data.source_metadata["minimum_targeted_search_enforced"] is True
     assert data.source_metadata["llm_tool_calls"]
+
+
+def test_news_analyst_forces_targeted_search_when_llm_skips_tools():
+    class NoToolLLM(FakeLLMClient):
+        def chat_tools_json(self, system, user, tools, execute_tool, max_rounds=4):
+            self.calls.append({"system": system, "user": user})
+            return {"result": {"not_schema": True}, "_tool_calls": []}
+
+    llm = NoToolLLM()
+    request = RunRequest(symbol="NVDA", asset_class="equity", horizon="short_term", llm_provider="fake")
+    calls: list[tuple[str, str]] = []
+    now = datetime.now(timezone.utc)
+
+    def route_tool(method: str, tool_request: RunRequest):
+        calls.append((method, tool_request.symbol))
+        return VendorRouteResult(
+            data=[
+                NewsEvent(
+                    title=f"{tool_request.symbol} company news",
+                    summary="Forced contract candidate",
+                    source="fake_news",
+                    published_at=now,
+                )
+            ],
+            status={"fake_news": "success", "tavily": "success"},
+        )
+
+    result, data = NewsImpactAnalyst().run_with_tools(request, llm, route_tool)
+
+    assert ("get_news", "NVDA") in calls
+    assert result.dominant_events == ["NVDA company news"]
+    assert data.source_metadata["minimum_targeted_search_enforced"] is True
+    assert data.source_metadata["forced_contract_calls"][0]["forced_by_contract"] is True
+
+
+def test_news_forced_search_fallback_filters_unrelated_provider_metadata():
+    class NoToolLLM(FakeLLMClient):
+        def chat_tools_json(self, system, user, tools, execute_tool, max_rounds=4):
+            self.calls.append({"system": system, "user": user})
+            return {"result": {"not_schema": True}, "_tool_calls": []}
+
+    llm = NoToolLLM()
+    request = RunRequest(symbol="NVDA", asset_class="equity", horizon="short_term", llm_provider="fake")
+    now = datetime.now(timezone.utc)
+
+    def route_tool(method: str, tool_request: RunRequest):
+        return VendorRouteResult(
+            data=[
+                NewsEvent(
+                    title="Prediction: XRP Will Hit $5 in 2026",
+                    summary="Crypto-only item with provider metadata noise",
+                    source="fake_news",
+                    published_at=now,
+                    related_assets=["NVDA"],
+                ),
+                NewsEvent(
+                    title="Nvidia data center demand lifts chip sector",
+                    summary="NVDA-linked AI infrastructure demand",
+                    source="fake_news",
+                    published_at=now,
+                    related_assets=["NVDA"],
+                ),
+            ],
+            status={"fake_news": "success", "tavily": "success"},
+        )
+
+    result, data = NewsImpactAnalyst().run_with_tools(request, llm, route_tool)
+
+    assert result.dominant_events == ["Nvidia data center demand lifts chip sector"]
+    assert data.source_metadata["filtered_candidate_count"] == 1
