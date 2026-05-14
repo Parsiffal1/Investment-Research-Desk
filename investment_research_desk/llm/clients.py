@@ -24,7 +24,14 @@ class FakeLLMClient:
     provider = "fake"
     model = "deterministic-fake-llm"
 
+    def __init__(self):
+        self.calls: list[dict[str, str]] = []
+
     def chat_json(self, system: str, user: str) -> dict:
+        self.calls.append({"system": system, "user": user})
+        candidate = _candidate_from_prompt(user)
+        if candidate is not None:
+            return candidate
         lowered = f"{system}\n{user}".lower()
         if "sentiment" in lowered:
             return {"label": "mixed", "score": 0.0, "summary": "Fixture-backed mixed sentiment."}
@@ -106,3 +113,16 @@ def _parse_json_object(content: str) -> dict:
         if start >= 0 and end > start:
             return json.loads(content[start : end + 1])
         raise
+
+
+def _candidate_from_prompt(user: str) -> dict | None:
+    marker = "Candidate output JSON:"
+    start = user.find(marker)
+    if start < 0:
+        return None
+    text = user[start + len(marker) :].strip()
+    try:
+        value, _ = json.JSONDecoder().raw_decode(text)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None

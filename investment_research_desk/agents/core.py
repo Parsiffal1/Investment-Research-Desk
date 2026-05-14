@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+from typing import Any, TypeVar
+
+from pydantic import BaseModel
+
 from investment_research_desk.llm import LLMClient
 from investment_research_desk.schemas import (
     FinalResearchContext,
@@ -22,6 +27,8 @@ from investment_research_desk.tools.indicators import (
     trend_label,
 )
 from investment_research_desk.agents.contracts import get_agent_contract
+
+TModel = TypeVar("TModel", bound=BaseModel)
 
 
 BULLISH_TERMS = {
@@ -82,12 +89,24 @@ class FundamentalMacroAnalyst:
             drivers.append("macro context is present but not strongly one-sided")
         if not concerns:
             concerns.append("limited macro evidence increases uncertainty")
-        return FundamentalMacroResult(
+        fallback = FundamentalMacroResult(
             fundamental_view=_view_from_counts(len(drivers), len(concerns)),
             key_drivers=drivers,
             concerns=concerns,
             confidence=0.66,
             evidence=[event.title for event in data.news_events[:3]],
+        )
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "symbol": data.symbol,
+                "asset_class": data.asset_class,
+                "source_metadata": data.source_metadata,
+                "news_events": [event.model_dump(mode="json") for event in data.news_events[:8]],
+            },
+            FundamentalMacroResult,
+            fallback,
         )
 
 
@@ -95,7 +114,6 @@ class NewsImpactAnalyst:
     name = "news_impact"
 
     def run(self, data: NormalizedData, llm: LLMClient) -> NewsImpactResult:
-        contract = get_agent_contract(self.name)
         dominant = [event.title for event in data.news_events[:5]]
         event_types: dict[str, str] = {}
         bullish = bearish = 0
@@ -109,26 +127,24 @@ class NewsImpactAnalyst:
             evidence.append(event.title)
         impact = _view_from_counts(bullish, bearish)
         impact_logic = _impact_logic(impact)
-        if llm.provider != "fake" and dominant:
-            try:
-                llm_result = llm.chat_json(
-                    contract.system_prompt,
-                    (
-                        "Analyze the market impact for the target asset. "
-                        "Return JSON with keys impact_logic and confidence. "
-                        f"Target: {data.symbol}. Events: {dominant}"
-                    ),
-                )
-                impact_logic = str(llm_result.get("impact_logic") or impact_logic)
-            except Exception:
-                impact_logic = f"{impact_logic} LLM impact refinement failed; deterministic fallback was used."
-        return NewsImpactResult(
+        fallback = NewsImpactResult(
             dominant_events=dominant or ["no material news events found"],
             event_type_summary=event_types or {"general": "low_importance"},
             asset_impact={data.symbol: impact},
             impact_logic=impact_logic,
             confidence=0.7 if dominant else 0.45,
             evidence=evidence[:5],
+        )
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "symbol": data.symbol,
+                "asset_class": data.asset_class,
+                "news_events": [event.model_dump(mode="json") for event in data.news_events[:12]],
+            },
+            NewsImpactResult,
+            fallback,
         )
 
 
@@ -155,12 +171,23 @@ class SentimentAnalyst:
             label = "neutral"
             mood = "quiet"
         evidence = texts[:5] or ["no sentiment inputs available"]
-        return SentimentResult(
+        fallback = SentimentResult(
             crowd_mood=mood,
             sentiment_label=label,
             sentiment_score=score,
             evidence=evidence,
             confidence=0.68 if texts else 0.35,
+        )
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "symbol": data.symbol,
+                "asset_class": data.asset_class,
+                "sentiment_inputs": [item.model_dump(mode="json") for item in data.sentiment_inputs[:20]],
+            },
+            SentimentResult,
+            fallback,
         )
 
 
@@ -180,7 +207,7 @@ class TechnicalAnalyst:
         momentum = _momentum_state(rsi_14, macd_hist)
         view = _technical_view(trend, rsi_14, macd_hist)
         vol_regime = "elevated" if rv is not None and rv > 0.7 else "normal"
-        return TechnicalState(
+        fallback = TechnicalState(
             technical_view=view,
             trend=trend,
             momentum=momentum,
@@ -195,10 +222,23 @@ class TechnicalAnalyst:
             resistance_zones=resistances,
             confidence=0.78 if len(bars) >= 26 else 0.45,
         )
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "symbol": data.symbol,
+                "asset_class": data.asset_class,
+                "indicator_results": fallback.model_dump(mode="json"),
+                "recent_ohlcv": [bar.model_dump(mode="json") for bar in bars[-10:]],
+                "instruction": "Read the deterministic indicator results and classify the technical state. Do not recalculate indicators.",
+            },
+            TechnicalState,
+            fallback,
+        )
 
 
 class ConstructiveCaseAnalyst:
-    name = "constructive_case"
+    name = "bull_researcher"
 
     def run(
         self,
@@ -217,7 +257,7 @@ class ConstructiveCaseAnalyst:
             evidence.append(f"technical state is {technical.technical_view} with trend {technical.trend}")
         if not evidence:
             evidence.append("constructive evidence is limited in the current inputs")
-        return ResearchCase(
+        fallback = ResearchCase(
             thesis="Constructive case depends on supportive macro drivers and technical confirmation.",
             evidence=evidence[:6],
             conditions=[
@@ -226,10 +266,22 @@ class ConstructiveCaseAnalyst:
             ],
             confidence=min(0.82, max(0.45, (fundamental.confidence + news.confidence + technical.confidence) / 3)),
         )
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "fundamental": fundamental.model_dump(mode="json"),
+                "news": news.model_dump(mode="json"),
+                "sentiment": sentiment.model_dump(mode="json"),
+                "technical": technical.model_dump(mode="json"),
+            },
+            ResearchCase,
+            fallback,
+        )
 
 
 class RiskCaseAnalyst:
-    name = "risk_case"
+    name = "bear_researcher"
 
     def run(
         self,
@@ -250,7 +302,7 @@ class RiskCaseAnalyst:
             evidence.append("realized volatility is elevated")
         if not evidence:
             evidence.append("risk evidence is limited but data coverage remains incomplete")
-        return ResearchCase(
+        fallback = ResearchCase(
             thesis="Risk case centers on macro repricing, volatility, and possible technical failure.",
             evidence=evidence[:6],
             conditions=[
@@ -259,6 +311,19 @@ class RiskCaseAnalyst:
                 "news flow contradicts the constructive case",
             ],
             confidence=min(0.85, max(0.45, (fundamental.confidence + news.confidence + technical.confidence) / 3)),
+        )
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "fundamental": fundamental.model_dump(mode="json"),
+                "news": news.model_dump(mode="json"),
+                "sentiment": sentiment.model_dump(mode="json"),
+                "technical": technical.model_dump(mode="json"),
+                "bull_researcher": constructive.model_dump(mode="json"),
+            },
+            ResearchCase,
+            fallback,
         )
 
 
@@ -281,7 +346,7 @@ class ResearchReporter:
         risk_level = _risk_level(risk, technical)
         key_drivers = _dedupe(constructive.evidence + fundamental.key_drivers + news.dominant_events)[:6]
         key_risks = _dedupe(risk.evidence + fundamental.concerns)[:6]
-        return FinalResearchContext(
+        fallback = FinalResearchContext(
             symbol=data.symbol,
             asset_class=data.asset_class,
             horizon=data.horizon,
@@ -311,6 +376,86 @@ class ResearchReporter:
             source_metadata=data.source_metadata,
             warnings=warnings,
         )
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "normalized_data_summary": {
+                    "symbol": data.symbol,
+                    "asset_class": data.asset_class,
+                    "horizon": data.horizon,
+                    "source_metadata": data.source_metadata,
+                },
+                "fundamental": fundamental.model_dump(mode="json"),
+                "news": news.model_dump(mode="json"),
+                "sentiment": sentiment.model_dump(mode="json"),
+                "technical": technical.model_dump(mode="json"),
+                "bull_researcher": constructive.model_dump(mode="json"),
+                "bear_researcher": risk.model_dump(mode="json"),
+                "warnings": warnings,
+            },
+            FinalResearchContext,
+            fallback,
+        )
+
+
+def _llm_structured(
+    agent_name: str,
+    llm: LLMClient,
+    input_payload: dict[str, Any],
+    schema_model: type[TModel],
+    fallback: TModel,
+) -> TModel:
+    contract = get_agent_contract(agent_name)
+    candidate = fallback.model_dump(mode="json")
+    user_prompt = (
+        f"Agent: {agent_name}\n"
+        f"Output schema name: {schema_model.__name__}\n"
+        "Return exactly one JSON object matching this Pydantic JSON schema. "
+        "Use the candidate output as the default answer, but refine interpretation when the provided evidence supports it. "
+        "Do not add fields outside the schema. Do not use buy/sell/order/position-sizing/profit-guarantee language. "
+        "For deterministic numeric fields, preserve the candidate values exactly unless the schema field is interpretive text.\n\n"
+        f"Pydantic JSON schema:\n{json.dumps(schema_model.model_json_schema(), ensure_ascii=False, default=str)}\n\n"
+        f"Allowed inputs:\n{json.dumps(contract.allowed_inputs, ensure_ascii=False)}\n\n"
+        f"Allowed tools:\n{json.dumps(contract.allowed_tools, ensure_ascii=False)}\n\n"
+        f"Input payload:\n{json.dumps(input_payload, ensure_ascii=False, default=str)}\n\n"
+        f"Candidate output JSON:\n{json.dumps(candidate, ensure_ascii=False, default=str)}"
+    )
+    try:
+        raw = llm.chat_json(contract.system_prompt, user_prompt)
+        if isinstance(raw.get("result"), dict):
+            raw = raw["result"]
+        result = schema_model.model_validate(raw)
+        return _preserve_deterministic_fields(agent_name, result, fallback)
+    except Exception:
+        return fallback
+
+
+def _preserve_deterministic_fields(agent_name: str, result: TModel, fallback: TModel) -> TModel:
+    if isinstance(result, TechnicalState) and isinstance(fallback, TechnicalState):
+        return result.model_copy(
+            update={
+                "rsi_14": fallback.rsi_14,
+                "atr_14": fallback.atr_14,
+                "bollinger_state": fallback.bollinger_state,
+                "realized_volatility": fallback.realized_volatility,
+                "max_drawdown": fallback.max_drawdown,
+                "support_zones": fallback.support_zones,
+                "resistance_zones": fallback.resistance_zones,
+            }
+        )
+    if isinstance(result, FinalResearchContext) and isinstance(fallback, FinalResearchContext):
+        return result.model_copy(
+            update={
+                "symbol": fallback.symbol,
+                "asset_class": fallback.asset_class,
+                "horizon": fallback.horizon,
+                "source_metadata": fallback.source_metadata,
+                "warnings": fallback.warnings,
+                "usage_constraints": fallback.usage_constraints,
+            }
+        )
+    return result
 
 
 def _view_from_counts(positive: int, negative: int) -> ViewLabel:

@@ -88,12 +88,14 @@ Data Ingestion
 
 Each workflow node has an explicit contract covering role, allowed inputs, allowed tools, forbidden actions, output schema, and system prompt. Contracts are persisted per run in `agent_contracts.json`.
 
+The seven analysis/research/reporting agents call the configured LLM through their contracts. Deterministic Python code first prepares factual candidate outputs, then the LLM reads the evidence and returns schema-validated JSON. If JSON generation or schema validation fails, the workflow falls back to the deterministic candidate and records warnings where applicable.
+
 The MVP enforces tool boundaries by scoping each analyst's input data before execution:
 
 - `Fundamental/Macro Analyst`: fundamental metadata, quote metadata, and macro/news context.
 - `News/Macro Impact Analyst`: news events only.
 - `Sentiment Analyst`: sentiment inputs only.
-- `Technical Analyst`: OHLCV and deterministic indicators only.
+- `Technical Analyst`: OHLCV and deterministic indicator results only; indicators are calculated by Python, then read by the LLM.
 - `Bull/Bear Researchers`: analyst outputs only, no direct external provider calls.
 - `Research Reporter`: analyst/debate outputs and warnings only.
 
