@@ -575,6 +575,14 @@ class ResearchReporter:
         llm: LLMClient,
     ) -> FinalResearchContext:
         balanced = _balance_view(news.asset_impact.get(data.symbol, "mixed"), sentiment.sentiment_label, technical.technical_view)
+        directional_view, directional_rationale = _directional_view(
+            balanced,
+            sentiment,
+            technical,
+            constructive,
+            risk,
+            news.asset_impact.get(data.symbol, "mixed"),
+        )
         risk_level = _risk_level(risk, technical)
         key_drivers = _dedupe(constructive.evidence + fundamental.key_drivers + news.dominant_events)[:6]
         key_risks = _dedupe(risk.evidence + fundamental.concerns)[:6]
@@ -583,6 +591,8 @@ class ResearchReporter:
             asset_class=data.asset_class,
             horizon=data.horizon,
             market_regime=f"{technical.trend}_{technical.volatility_regime}",
+            directional_view=directional_view,
+            directional_rationale=directional_rationale,
             balanced_view=balanced,
             risk_level=risk_level,
             confidence=round((fundamental.confidence + news.confidence + sentiment.confidence + technical.confidence) / 4, 2),
@@ -945,6 +955,45 @@ def _balance_view(news_view: str, sentiment_label: str, technical_view: str) -> 
     bullish = joined.count("bullish")
     bearish = joined.count("bearish")
     return _view_from_counts(bullish, bearish)
+
+
+def _directional_view(
+    balanced_view: str,
+    sentiment: SentimentResult,
+    technical: TechnicalState,
+    constructive: ResearchCase,
+    risk: ResearchCase,
+    news_view: str,
+) -> tuple[str, str]:
+    score = (
+        _view_score(balanced_view) * 1.5
+        + _view_score(news_view)
+        + _view_score(sentiment.sentiment_label)
+        + _view_score(technical.technical_view)
+        + sentiment.sentiment_score
+        + constructive.confidence
+        - risk.confidence
+    )
+    direction = "bullish" if score >= 0 else "bearish"
+    rationale = (
+        f"Directional research judgment is {direction} because balanced_view={balanced_view}, "
+        f"news_impact={news_view}, sentiment={sentiment.sentiment_label}/{sentiment.sentiment_score}, "
+        f"technical_view={technical.technical_view}, constructive_confidence={constructive.confidence}, "
+        f"risk_confidence={risk.confidence}."
+    )
+    return direction, rationale
+
+
+def _view_score(view: str) -> float:
+    if view in {"bullish", "mixed_to_bullish"}:
+        return 1.0
+    if view == "neutral_to_bullish":
+        return 0.5
+    if view in {"bearish", "mixed_to_bearish"}:
+        return -1.0
+    if view == "neutral_to_bearish":
+        return -0.5
+    return 0.0
 
 
 def _risk_level(risk: ResearchCase, technical: TechnicalState) -> str:

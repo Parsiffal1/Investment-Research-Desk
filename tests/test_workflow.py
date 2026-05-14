@@ -16,6 +16,8 @@ def test_fixture_workflow_creates_artifacts(tmp_path: Path):
 
     context = FinalResearchContext.model_validate(state["final_context"])
     assert context.symbol == "XAU-USDT-SWAP"
+    assert context.directional_view in {"bullish", "bearish"}
+    assert context.directional_rationale
     assert context.key_drivers
     run_dir = tmp_path / state["run_id"]
     assert (run_dir / "agent_contracts.json").exists()

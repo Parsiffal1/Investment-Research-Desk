@@ -20,6 +20,7 @@ ViewLabel = Literal[
     "neutral_to_bearish",
 ]
 RiskLevel = Literal["low", "medium", "high", "unknown"]
+DirectionalView = Literal["bullish", "bearish"]
 
 
 def utc_now() -> datetime:
@@ -135,6 +136,8 @@ class FinalResearchContext(BaseModel):
     timestamp: datetime = Field(default_factory=utc_now)
     horizon: Horizon
     market_regime: str
+    directional_view: DirectionalView
+    directional_rationale: str
     balanced_view: ViewLabel
     risk_level: RiskLevel
     confidence: float = Field(ge=0, le=1)

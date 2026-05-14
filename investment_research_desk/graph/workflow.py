@@ -800,6 +800,8 @@ def render_markdown_brief(final: FinalResearchContext) -> str:
         f"Use as research context only. This is not financial advice, an order instruction, or position sizing guidance.\n\n"
         f"- Horizon: {final.horizon}\n"
         f"- Market regime: {final.market_regime}\n"
+        f"- Directional view: {final.directional_view}\n"
+        f"- Directional rationale: {final.directional_rationale}\n"
         f"- Balanced view: {final.balanced_view}\n"
         f"- Risk level: {final.risk_level}\n"
         f"- Confidence: {final.confidence}\n\n"
@@ -834,6 +836,8 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"- Asset class: {final.asset_class}\n"
             f"- Horizon: {final.horizon}\n"
             f"- Market regime: {final.market_regime}\n"
+            f"- Directional view: {final.directional_view}\n"
+            f"- Directional rationale: {final.directional_rationale}\n"
             f"- Balanced view: {final.balanced_view}\n"
             f"- Risk level: {final.risk_level}\n"
             f"- Confidence: {final.confidence}",

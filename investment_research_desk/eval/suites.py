@@ -161,6 +161,8 @@ def _single_agent_fixture_baseline(data) -> FinalResearchContext:
         asset_class=data.asset_class,
         horizon=data.horizon,
         market_regime="single_agent_direct_summary",
+        directional_view="bullish",
+        directional_rationale="Single-agent fixture baseline uses a bullish placeholder direction when evidence is not separated by analyst role.",
         balanced_view="mixed",
         risk_level="medium",
         confidence=0.55,

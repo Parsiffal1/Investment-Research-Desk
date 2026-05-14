@@ -11,7 +11,7 @@ import questionary
 import typer
 from rich import box
 from rich.align import Align
-from rich.console import Console
+from rich.console import Console, Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
@@ -35,7 +35,6 @@ from investment_research_desk.cli_contract import (
 from investment_research_desk.config import load_settings
 from investment_research_desk.eval import run_eval_suite
 from investment_research_desk.graph import ResearchWorkflow
-from investment_research_desk.graph.workflow import render_markdown_report
 from investment_research_desk.llm import OllamaLLMClient
 from investment_research_desk.persistence import RunStore
 from investment_research_desk.providers.okx import OkxMarketDataProvider
@@ -143,7 +142,7 @@ class CLIRunDashboard:
         layout["header"].update(_runtime_header(self.request))
         layout["progress"].update(_runtime_progress_panel(self.statuses))
         layout["messages"].update(_runtime_messages_panel(self.messages))
-        layout["report"].update(Panel(Text(_console_safe(self.current_report), overflow="fold"), title="Current Report", border_style="green"))
+        layout["report"].update(Panel(_plain_report_text(self.current_report), title="Current Report", border_style="green"))
         elapsed = time.perf_counter() - self.started
         footer = f"Tool Calls: {self.tool_calls} | Generated Reports: {self.llm_reports} | Elapsed: {int(elapsed // 60):02d}:{int(elapsed % 60):02d}"
         layout["footer"].update(Panel(Align.center(footer), border_style="grey50"))
@@ -720,13 +719,7 @@ def _running_table(started: float, completed: bool = False) -> Panel:
 
 def _print_run_summary(state: dict) -> None:
     final = FinalResearchContext.model_validate(state["final_context"])
-    console.print(
-        Panel(
-            Text(_console_safe(render_markdown_report(state)), overflow="fold"),
-            title=f"Research Context Report | {final.symbol} | {final.balanced_view} | risk={final.risk_level}",
-            border_style="green",
-        )
-    )
+    _print_console_report(state)
     table = Table(title="Agent Trace")
     table.add_column("Agent/Node")
     table.add_column("Status")
@@ -743,6 +736,175 @@ def _print_run_summary(state: dict) -> None:
         paths.add_row(name, path)
     console.print(paths)
     _print_artifact_contract(state)
+
+
+def _print_console_report(state: dict) -> None:
+    final = FinalResearchContext.model_validate(state["final_context"])
+    fundamental = state.get("fundamental", {})
+    news = state.get("news", {})
+    sentiment = state.get("sentiment", {})
+    technical = state.get("technical", {})
+    constructive = state.get("constructive", {})
+    risk = state.get("risk", {})
+    data = state.get("data", {})
+    metrics = state.get("metrics") or {}
+
+    executive = Table.grid(expand=True)
+    executive.add_column(ratio=1)
+    executive.add_column(ratio=3)
+    executive.add_row("Symbol", final.symbol)
+    executive.add_row("Directional View", f"[{_direction_style(final.directional_view)}]{final.directional_view.upper()}[/]")
+    executive.add_row("Directional Rationale", _console_safe(final.directional_rationale))
+    executive.add_row("Balanced View", final.balanced_view)
+    executive.add_row("Risk Level", final.risk_level)
+    executive.add_row("Confidence", str(final.confidence))
+    executive.add_row("Horizon", final.horizon)
+    executive.add_row("Market Regime", final.market_regime)
+    console.print(
+        Panel(
+            executive,
+            title=f"Final Research Context Report | {final.symbol}",
+            subtitle="Research context only; not financial advice or execution instruction",
+            border_style=_direction_style(final.directional_view),
+        )
+    )
+
+    console.print(
+        Group(
+            _agent_panel(
+                "Fundamental / Macro Analyst",
+                [
+                    ("View", fundamental.get("fundamental_view")),
+                    ("Confidence", fundamental.get("confidence")),
+                    ("Key Drivers", _plain_list(fundamental.get("key_drivers"))),
+                    ("Concerns", _plain_list(fundamental.get("concerns"))),
+                    ("Evidence", _plain_list(fundamental.get("evidence"))),
+                ],
+            ),
+            _agent_panel(
+                "News / Macro Impact Analyst",
+                [
+                    ("Impact Logic", news.get("impact_logic")),
+                    ("Confidence", news.get("confidence")),
+                    ("Asset Impact", (news.get("asset_impact") or {}).get(final.symbol, "mixed")),
+                    ("Dominant Events", _plain_list(news.get("dominant_events"))),
+                    ("Evidence", _plain_list(news.get("evidence"))),
+                ],
+            ),
+            _agent_panel(
+                "Sentiment Analyst",
+                [
+                    ("Crowd Mood", sentiment.get("crowd_mood")),
+                    ("Label", sentiment.get("sentiment_label")),
+                    ("Score", sentiment.get("sentiment_score")),
+                    ("Confidence", sentiment.get("confidence")),
+                    ("Evidence", _plain_list(sentiment.get("evidence"))),
+                ],
+            ),
+            _agent_panel(
+                "Technical Analyst",
+                [
+                    ("View", technical.get("technical_view")),
+                    ("Trend", technical.get("trend")),
+                    ("Momentum", technical.get("momentum")),
+                    ("Volatility", technical.get("volatility_regime")),
+                    ("RSI 14", technical.get("rsi_14")),
+                    ("MACD", technical.get("macd_state")),
+                    ("ATR 14", technical.get("atr_14")),
+                    ("Realized Volatility", technical.get("realized_volatility")),
+                    ("Max Drawdown", technical.get("max_drawdown")),
+                    ("OKX Mark / Index", f"{technical.get('mark_price')} / {technical.get('index_price')}"),
+                    ("OKX Funding", technical.get("funding_rate")),
+                    ("OKX Open Interest", technical.get("open_interest")),
+                    ("Orderbook Imbalance", technical.get("orderbook_imbalance")),
+                    ("Support Zones", _plain_list(technical.get("support_zones"))),
+                    ("Resistance Zones", _plain_list(technical.get("resistance_zones"))),
+                ],
+            ),
+            _agent_panel(
+                "Bull / Constructive Researcher",
+                [
+                    ("Thesis", constructive.get("thesis")),
+                    ("Evidence", _plain_list(constructive.get("evidence"))),
+                    ("Conditions", _plain_list(constructive.get("conditions"))),
+                    ("Confidence", constructive.get("confidence")),
+                ],
+            ),
+            _agent_panel(
+                "Bear / Risk Researcher",
+                [
+                    ("Thesis", risk.get("thesis")),
+                    ("Evidence", _plain_list(risk.get("evidence"))),
+                    ("Conditions", _plain_list(risk.get("conditions"))),
+                    ("Confidence", risk.get("confidence")),
+                ],
+            ),
+            _agent_panel(
+                "Research Reporter",
+                [
+                    ("Fundamental Summary", final.fundamental_summary),
+                    ("News Impact Summary", final.news_impact_summary),
+                    ("Sentiment Summary", final.sentiment_summary),
+                    ("Technical Summary", final.technical_summary),
+                    ("Key Drivers", _plain_list(final.key_drivers)),
+                    ("Key Risks", _plain_list(final.key_risks)),
+                    ("Uncertainty Factors", _plain_list(final.uncertainty_factors)),
+                ],
+            ),
+            _agent_panel(
+                "Data And Run Metadata",
+                [
+                    ("OHLCV Bars", len(data.get("ohlcv") or [])),
+                    ("Market Context Sections", ", ".join((data.get("market_context") or {}).keys()) or "None"),
+                    ("News Events", len(data.get("news_events") or [])),
+                    ("Sentiment Inputs", len(data.get("sentiment_inputs") or [])),
+                    ("Provider Mode", (data.get("source_metadata") or {}).get("provider_mode", "unknown")),
+                    ("Tool Policy", (data.get("source_metadata") or {}).get("tool_call_policy", "unknown")),
+                    ("Guardrail Violations", ", ".join(metrics.get("guardrail_violations") or []) or "None"),
+                ],
+            ),
+            _agent_panel(
+                "Usage Boundary",
+                [
+                    ("Constraints", _plain_list(final.usage_constraints)),
+                    ("Downstream Context", final.downstream_agent_context),
+                ],
+            ),
+        )
+    )
+
+
+def _agent_panel(title: str, rows: list[tuple[str, Any]]) -> Panel:
+    table = Table.grid(expand=True, padding=(0, 1))
+    table.add_column(ratio=1, style="cyan")
+    table.add_column(ratio=4)
+    for label, value in rows:
+        table.add_row(label, _console_safe(str(value if value is not None else "None")))
+    return Panel(table, title=title, border_style="green")
+
+
+def _plain_list(items: Any) -> str:
+    if not items:
+        return "None"
+    if isinstance(items, list):
+        return "\n".join(f"- {item}" for item in items) if items else "None"
+    return str(items)
+
+
+def _plain_report_text(markdown_text: str) -> Text:
+    lines = []
+    for line in _console_safe(markdown_text).splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            stripped = stripped.lstrip("#").strip().upper()
+        elif stripped.startswith("- "):
+            stripped = f"- {stripped[2:]}"
+        lines.append(stripped)
+    return Text("\n".join(lines), overflow="fold")
+
+
+def _direction_style(direction: str) -> str:
+    return "green" if direction == "bullish" else "red"
 
 
 def _print_artifact_contract(state: dict) -> None:
