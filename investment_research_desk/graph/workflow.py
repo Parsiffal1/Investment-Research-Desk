@@ -361,7 +361,7 @@ class ResearchWorkflow:
                 asset_class=request.asset_class,
                 horizon=request.horizon,
                 ohlcv=market_result.data,
-                market_context={"okx_swap": swap_context_result.data},
+                market_context={"okx_swap": swap_context_result.data} if swap_context_result.data else {},
                 source_metadata={
                     "provider_mode": "live",
                     "tool_call_policy": "agent_called_allowed_tools",

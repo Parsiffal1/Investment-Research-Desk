@@ -144,7 +144,7 @@ class CLIRunDashboard:
         layout["header"].update(_runtime_header(self.request))
         layout["progress"].update(_runtime_progress_panel(self.statuses))
         layout["messages"].update(_runtime_messages_panel(self.messages))
-        layout["report"].update(Panel(Text(self.current_report, overflow="fold"), title="Current Report", border_style="green"))
+        layout["report"].update(Panel(Text(_console_safe(self.current_report), overflow="fold"), title="Current Report", border_style="green"))
         elapsed = time.perf_counter() - self.started
         footer = f"Tool Calls: {self.tool_calls} | Generated Reports: {self.llm_reports} | Elapsed: {int(elapsed // 60):02d}:{int(elapsed % 60):02d}"
         layout["footer"].update(Panel(Align.center(footer), border_style="grey50"))
@@ -736,7 +736,7 @@ def _print_run_summary(state: dict) -> None:
     final = FinalResearchContext.model_validate(state["final_context"])
     console.print(
         Panel(
-            Text(render_markdown_report(state), overflow="fold"),
+            Text(_console_safe(render_markdown_report(state)), overflow="fold"),
             title=f"Research Context Report | {final.symbol} | {final.balanced_view} | risk={final.risk_level}",
             border_style="green",
         )
@@ -749,7 +749,7 @@ def _print_run_summary(state: dict) -> None:
         table.add_row(agent["name"], agent["status"], f"{agent['latency_sec']}s")
     console.print(table)
     if state.get("warnings"):
-        console.print(Panel("\n".join(state["warnings"]), title="Warnings", style="yellow"))
+        console.print(Panel(_console_safe("\n".join(state["warnings"])), title="Warnings", style="yellow"))
     paths = Table(title="Output Paths")
     paths.add_column("Artifact")
     paths.add_column("Path")
@@ -845,6 +845,11 @@ def _exit_with_error(message: str, hints: list[str] | None = None) -> None:
         lines.extend(f"- {hint}" for hint in hints)
     console.print(Panel("\n".join(lines), title="CLI Contract Error", border_style="red"))
     raise typer.Exit(code=2)
+
+
+def _console_safe(text: str) -> str:
+    encoding = getattr(console.file, "encoding", None) or "utf-8"
+    return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
 
 
 def _http_status(url: str) -> str:

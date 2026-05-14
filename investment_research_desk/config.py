@@ -22,7 +22,7 @@ class Settings:
     jin10_api_url: str | None = None
     jin10_api_key: str | None = None
     runs_dir: Path = Path("runs")
-    market_data_vendors: str = "okx,fmp,yahoo_finance"
+    market_data_vendors: str = "okx,yahoo_finance,fmp"
     news_data_vendors: str = "jin10,finnhub,yahoo_finance"
     sentiment_data_vendors: str = "tavily,stocktwits,reddit"
     fundamental_data_vendors: str = "fmp,finnhub"
@@ -45,7 +45,7 @@ def load_settings() -> Settings:
         jin10_api_url=os.getenv("JIN10_API_URL") or None,
         jin10_api_key=os.getenv("JIN10_API_KEY") or None,
         runs_dir=Path(os.getenv("IRD_RUNS_DIR", "runs")),
-        market_data_vendors=os.getenv("IRD_MARKET_DATA_VENDORS", "okx,fmp,yahoo_finance"),
+        market_data_vendors=os.getenv("IRD_MARKET_DATA_VENDORS", "okx,yahoo_finance,fmp"),
         news_data_vendors=os.getenv("IRD_NEWS_DATA_VENDORS", "jin10,finnhub,yahoo_finance"),
         sentiment_data_vendors=os.getenv("IRD_SENTIMENT_DATA_VENDORS", "tavily,stocktwits,reddit"),
         fundamental_data_vendors=os.getenv("IRD_FUNDAMENTAL_DATA_VENDORS", "fmp,finnhub"),

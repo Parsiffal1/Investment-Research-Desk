@@ -38,14 +38,7 @@ class FmpProvider:
         if not self.api_key:
             return []
         symbol = _normalize_equity_symbol(request.symbol)
-        if request.horizon in {"intraday", "short_term"}:
-            endpoint = f"historical-chart/{'30min' if request.horizon == 'intraday' else '1hour'}"
-            try:
-                data = self._get(endpoint, {"symbol": symbol})
-            except RuntimeError:
-                data = self._get("historical-price-eod/full", {"symbol": symbol})
-        else:
-            data = self._get("historical-price-eod/full", {"symbol": symbol})
+        data = self._get("historical-price-eod/light", {"symbol": symbol})
         if not isinstance(data, list):
             return []
         bars: list[OHLCVBar] = []
@@ -55,13 +48,14 @@ class FmpProvider:
                 timestamp = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
                 if timestamp.tzinfo is None:
                     timestamp = timestamp.replace(tzinfo=timezone.utc)
+                close = _row_float(row, "close", "price")
                 bars.append(
                     OHLCVBar(
                         timestamp=timestamp,
-                        open=float(row["open"]),
-                        high=float(row["high"]),
-                        low=float(row["low"]),
-                        close=float(row["close"]),
+                        open=_row_float(row, "open", default=close),
+                        high=_row_float(row, "high", default=close),
+                        low=_row_float(row, "low", default=close),
+                        close=close,
                         volume=float(row.get("volume") or 0),
                     )
                 )
@@ -80,3 +74,13 @@ class FmpProvider:
 
 def _normalize_equity_symbol(symbol: str) -> str:
     return symbol.split(":")[-1].split("-")[0] if "-USDT" in symbol else symbol.upper()
+
+
+def _row_float(row: dict, *keys: str, default: float | None = None) -> float:
+    for key in keys:
+        value = row.get(key)
+        if value is not None:
+            return float(value)
+    if default is not None:
+        return default
+    raise KeyError(keys[0] if keys else "value")

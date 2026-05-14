@@ -41,7 +41,10 @@ FMP_API_KEY=
 FINNHUB_API_KEY=
 ```
 
-OKX market data is the preferred SWAP market-data source. `ETH` with `asset_class=crypto`
+OKX market data is the preferred SWAP market-data source. Yahoo Finance is preferred for
+equity OHLCV. FMP is used inside the free-tier boundary for fundamentals and, if needed,
+as a close/volume-only `historical-price-eod/light` fallback rather than the paid `full`
+historical endpoint. `ETH` with `asset_class=crypto`
 is resolved to OKX instruments such as `ETH-USDT-SWAP` before K-line retrieval, and exact
 OKX SWAP instrument IDs such as `BTC-USDT-SWAP` are used directly. The project uses public
 OKX SWAP market endpoints only: K-lines, ticker, mark price, funding rate/history, open

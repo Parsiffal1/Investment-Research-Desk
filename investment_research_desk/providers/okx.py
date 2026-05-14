@@ -16,6 +16,8 @@ class OkxMarketDataProvider:
         self.timeout = timeout
 
     def fetch_ohlcv(self, request: RunRequest) -> list[OHLCVBar]:
+        if not _is_swap_request(request):
+            return []
         params = {"instId": self.resolve_inst_id(request), "bar": self._bar_for_horizon(request.horizon), "limit": "100"}
         payload = self._public_get("/api/v5/market/candles", params)
         bars: list[OHLCVBar] = []
@@ -34,6 +36,8 @@ class OkxMarketDataProvider:
         return list(reversed(bars))
 
     def fetch_swap_market_context(self, request: RunRequest) -> dict[str, Any]:
+        if not _is_swap_request(request):
+            return {}
         inst_id = self.resolve_inst_id(request)
         if not inst_id.endswith("-SWAP") or not self._instrument_exists(inst_id):
             return {}
@@ -152,6 +156,11 @@ def _orderbook_imbalance(orderbook: dict[str, Any]) -> float | None:
     if total == 0:
         return None
     return round((bid_size - ask_size) / total, 4)
+
+
+def _is_swap_request(request: RunRequest) -> bool:
+    symbol = request.symbol.strip().upper()
+    return symbol.endswith("-SWAP") or request.asset_class in {"crypto", "precious_metal", "commodity"}
 
 
 def _mark_index_spread(mark_price: dict[str, Any] | None, index_ticker: dict[str, Any] | None) -> float | None:
