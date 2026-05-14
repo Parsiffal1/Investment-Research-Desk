@@ -33,6 +33,14 @@ def test_cli_report_fixture(tmp_path):
     assert list(tmp_path.glob("*/final_market_context_cache.json"))
 
 
+def test_cli_demo_uses_fixture_fake_path(tmp_path):
+    result = runner.invoke(app, ["demo", "--runs-dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Research Context" in result.output
+    assert list(tmp_path.glob("*/final_research_context.json"))
+
+
 def test_cli_report_rejects_missing_symbol_for_live_run(tmp_path):
     result = runner.invoke(
         app,

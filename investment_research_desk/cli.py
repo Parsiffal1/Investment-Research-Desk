@@ -30,7 +30,6 @@ from investment_research_desk.cli_contract import (
     ResearchDepthOption,
     TEAM_FLOW,
     build_run_request,
-    discover_fixtures,
     discover_runs,
 )
 from investment_research_desk.config import load_settings
@@ -171,9 +170,6 @@ def interactive() -> None:
     if contract.mode == "list_runs":
         list_runs(runs_dir=contract.runs_dir, resumable_only=False)
         return
-    if contract.mode == "clear_checkpoints":
-        _clear_checkpoints(contract.runs_dir)
-        return
     if contract.mode == "exit":
         console.print("[dim]Exited without running research.[/dim]")
         return
@@ -202,70 +198,44 @@ def _collect_interactive_contract() -> CLIInteractionContract:
     console.print(_welcome_panel())
     console.print(_workflow_panel())
 
-    console.print(_step_panel(1, "Workflow Action", "Choose whether to start research, resume, inspect runs, or check configuration."))
+    console.print(_step_panel(1, "Action", "Choose the next Investment Research Desk workflow."))
     action = _select(
         "Select action",
         [
             questionary.Choice("New research report", "new_report"),
-            questionary.Choice("Resume from checkpoint", "resume"),
-            questionary.Choice("List runs", "list_runs"),
-            questionary.Choice("Config check", "config_check"),
-            questionary.Choice("Clear unfinished checkpoints", "clear_checkpoints"),
+            questionary.Choice("Resume previous run", "resume"),
+            questionary.Choice("View run history", "list_runs"),
+            questionary.Choice("System check", "config_check"),
             questionary.Choice("Exit", "exit"),
         ],
     )
-    runs_dir = Path(
-        questionary.text("Runs directory", default=str(settings.runs_dir), style=CLI_STYLE).ask() or str(settings.runs_dir)
-    )
+    runs_dir = settings.runs_dir
 
-    if action in {"config_check", "list_runs", "clear_checkpoints", "exit"}:
+    if action in {"config_check", "list_runs", "exit"}:
         return CLIInteractionContract(mode=action, request=None, checkpoint=False, resume_run_id=None, runs_dir=runs_dir)
 
     if action == "resume":
         console.print(_step_panel(2, "Checkpoint", "Select a resumable run and continue from the last saved graph step."))
         run_id = _select_resume_run(runs_dir)
-        checkpoint = _confirm("Continue saving checkpoints after resume?", default=True)
-        return CLIInteractionContract(mode="resume", request=None, checkpoint=checkpoint, resume_run_id=run_id, runs_dir=runs_dir)
+        return CLIInteractionContract(mode="resume", request=None, checkpoint=True, resume_run_id=run_id, runs_dir=runs_dir)
 
-    console.print(_step_panel(2, "Data Source", "Use stable fixture data for demos/tests, or live providers for a current research run."))
-    data_mode = _select(
-        "Select data mode",
-        [
-            questionary.Choice("Fixture demo (stable local data)", "fixture"),
-            questionary.Choice("Live providers (OKX/FMP/Finnhub/Tavily/public adapters)", "live"),
-        ],
-    )
-    fixture = None
     symbol: str | None = None
     asset_class: str | AssetClassOption = AssetClassOption.crypto
     horizon: str | HorizonOption = HorizonOption.short_term
-    if data_mode == "fixture":
-        fixtures = discover_fixtures()
-        console.print(_step_panel(3, "Fixture Scenario", "Select a frozen scenario for repeatable local research.", "gold_cpi"))
-        fixture = _select(
-            "Select fixture",
-            [questionary.Choice(name, name) for name in fixtures] or [questionary.Choice("gold_cpi", "gold_cpi")],
-        )
-    else:
-        console.print(_step_panel(3, "Instrument", "Enter the exact research symbol. Examples: NVDA, AAPL, BTC-USDT-SWAP.", "BTC-USDT-SWAP"))
-        symbol = questionary.text(
-            "Symbol",
-            default="BTC-USDT-SWAP",
-            validate=lambda value: bool(value.strip()) or "Symbol is required.",
-            style=CLI_STYLE,
-        ).ask()
-        console.print(_step_panel(4, "Asset Class", "Select the asset class so providers, prompts, and validation use the right contract."))
-        asset_class = _enum_select("Asset class", AssetClassOption, AssetClassOption.crypto)
-        console.print(_step_panel(5, "Research Horizon", "Select the time horizon for analysis framing and prompt context.", HorizonOption.short_term.value))
-        horizon = _enum_select("Horizon", HorizonOption, HorizonOption.short_term)
 
-    console.print(_step_panel(6, "Research Depth", "Select how much reasoning/debate depth to request from the workflow.", ResearchDepthOption.standard.value))
+    console.print(_step_panel(2, "Instrument", "Enter the exact research symbol. Examples: NVDA, AAPL, BTC-USDT-SWAP.", "BTC-USDT-SWAP"))
+    symbol = questionary.text(
+        "Symbol",
+        default="BTC-USDT-SWAP",
+        validate=lambda value: bool(value.strip()) or "Symbol is required.",
+        style=CLI_STYLE,
+    ).ask()
+    console.print(_step_panel(3, "Asset Class", "Select the asset class so providers, prompts, and validation use the right contract."))
+    asset_class = _enum_select("Asset class", AssetClassOption, AssetClassOption.crypto)
+    console.print(_step_panel(4, "Research Horizon", "Select the time horizon for analysis framing and prompt context.", HorizonOption.short_term.value))
+    horizon = _enum_select("Horizon", HorizonOption, HorizonOption.short_term)
+    console.print(_step_panel(5, "Research Depth", "Select how much reasoning/debate depth to request from the workflow.", ResearchDepthOption.standard.value))
     research_depth = _enum_select("Research depth", ResearchDepthOption, ResearchDepthOption.standard)
-    console.print(_step_panel(7, "LLM Provider", "Select the LLM runtime. Ollama with qwen3:8b remains the primary local path.", LLMProviderOption.auto.value))
-    llm_provider = _enum_select("LLM provider", LLMProviderOption, LLMProviderOption.auto)
-    default_model = settings.ollama_model if llm_provider in {LLMProviderOption.auto, LLMProviderOption.ollama} else ""
-    model = questionary.text("Model override", default=default_model, style=CLI_STYLE).ask() or None
-    checkpoint = _confirm("Save checkpoints after graph steps?", default=True)
 
     try:
         request = build_run_request(
@@ -273,21 +243,41 @@ def _collect_interactive_contract() -> CLIInteractionContract:
             asset_class=asset_class,
             horizon=horizon,
             research_depth=research_depth,
-            fixture=fixture,
-            llm_provider=llm_provider,
-            model=model,
+            fixture=None,
+            llm_provider=LLMProviderOption.ollama,
+            model=settings.ollama_model,
         )
     except ValueError as exc:
         _exit_with_error(str(exc))
 
-    _print_request_review(request, checkpoint=checkpoint, runs_dir=runs_dir, mode=data_mode)
+    _print_request_review(request, checkpoint=True, runs_dir=runs_dir, mode="live")
     if not _confirm("Start this research run?", default=True):
         raise typer.Exit()
     return CLIInteractionContract(
         mode="new_report",
         request=request,
-        checkpoint=checkpoint,
+        checkpoint=True,
         resume_run_id=None,
+        runs_dir=runs_dir,
+    )
+
+
+@app.command()
+def demo(
+    fixture: str = typer.Option("gold_cpi", "--fixture", help="Fixture scenario for local demo."),
+    runs_dir: Optional[Path] = typer.Option(None, "--runs-dir", help="Override runs output directory."),
+) -> None:
+    run_report(
+        symbol=None,
+        asset_class=AssetClassOption.crypto,
+        horizon=HorizonOption.short_term,
+        research_depth=ResearchDepthOption.standard,
+        fixture=fixture,
+        llm_provider=LLMProviderOption.fake,
+        model=None,
+        checkpoint=False,
+        resume=None,
+        clear_checkpoints=False,
         runs_dir=runs_dir,
     )
 
@@ -505,7 +495,6 @@ def config_check() -> None:
     table.add_row("StockTwits", *_simple_http_status("https://api.stocktwits.com/api/2/streams/symbol/AAPL.json", "public stream reachable"))
     table.add_row("Reddit", *_simple_http_status("https://www.reddit.com/r/stocks/search.json?q=AAPL&restrict_sr=on&sort=new&t=week&limit=1", "public search reachable"))
     table.add_row("Jin10", "OK" if settings.jin10_api_url else "WARN", "JIN10_API_URL set" if settings.jin10_api_url else "JIN10_API_URL not set")
-    table.add_row("Fixtures", "OK" if Path("data/fixtures/gold_cpi.json").exists() else "WARN", "gold_cpi fixture")
     console.print(table)
 
 

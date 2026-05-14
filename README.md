@@ -10,7 +10,7 @@ It is **not** an autonomous trading or execution system. It does not place order
 uv sync
 uv run ird --help
 uv run ird config check
-uv run ird report --fixture gold_cpi --llm-provider fake
+uv run ird demo
 uv run ird eval --suite schema
 uv run ird eval --suite guardrail
 ```
@@ -20,7 +20,7 @@ For Ollama-backed local inference, set:
 ```powershell
 $env:IRD_OLLAMA_BASE_URL="http://localhost:11434/v1"
 $env:IRD_OLLAMA_MODEL="qwen3:8b"
-uv run ird report --fixture gold_cpi --llm-provider ollama
+uv run ird report --symbol NVDA --asset-class equity --horizon short_term --llm-provider ollama
 ```
 
 API keys can be placed in a local `.env` file in the project root. The loader also accepts `notepad.env` for this workspace. Start from `.env.example` and do not commit real keys:
@@ -60,6 +60,7 @@ The baseline model target is Qwen3-8B Instruct/Chat. LoRA integration remains pe
 ## CLI
 
 - `ird` starts an interactive research flow.
+- `ird demo` runs a local fixture-backed demo with the deterministic fake LLM.
 - `ird report` generates one research context.
 - `ird batch` runs multiple symbols.
 - `ird runs` lists completed, partial, and resumable run directories.
@@ -72,8 +73,7 @@ The baseline model target is Qwen3-8B Instruct/Chat. LoRA integration remains pe
 
 ```text
 New research report
-  -> choose fixture or live providers
-  -> choose symbol, asset class, horizon, research depth, LLM provider, model
+  -> choose symbol, asset class, horizon, research depth
   -> review the run contract
   -> run Analyst Team -> Bull/Bear Research Debate -> Research Reporter
 
@@ -81,7 +81,7 @@ Resume from checkpoint
   -> choose an existing run_id with checkpoint.json
   -> continue from the latest completed graph step
 
-List runs / Config check / Clear unfinished checkpoints
+View run history / System check
   -> operational CLI actions with explicit status output
 ```
 
@@ -91,10 +91,11 @@ Validated option domains:
 asset_class: crypto, precious_metal, equity_index, commodity, fx, equity, other
 horizon: intraday, short_term, swing, medium_term
 research_depth: quick, standard, deep
-llm_provider: auto, fake, ollama
 ```
 
-Errors are reported as `CLI Contract Error` panels with actionable hints. Live Ollama runs preflight `http://localhost:11434/v1/models` before the workflow starts; fixture + `auto` can fall back to the deterministic fake LLM for stable local demos.
+The interactive flow always uses the configured Ollama model, defaulting to `qwen3:8b`, and saves checkpoints automatically. Demo and fake-LLM execution are available through `ird demo` and explicit non-interactive `ird report` flags only.
+
+Errors are reported as `CLI Contract Error` panels with actionable hints. Live Ollama runs preflight `http://localhost:11434/v1/models` before the workflow starts.
 
 Each report run writes:
 
