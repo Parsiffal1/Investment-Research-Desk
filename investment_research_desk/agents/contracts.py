@@ -77,12 +77,18 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         team="analyst",
         role="Decide which news tools to call, classify candidate news/macro events, and summarize possible asset impact.",
         allowed_inputs=["RunRequest", "tool results from get_news/get_global_news"],
-        allowed_tools=["route_to_vendor.get_news", "route_to_vendor.get_global_news", "news_event_classifier", "llm_tool_loop", "llm_json_refinement"],
+        allowed_tools=[
+            "route_to_vendor.get_news",
+            "route_to_vendor.get_global_news",
+            "llm_query_planner",
+            "news_event_classifier",
+            "llm_json_refinement",
+        ],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="NewsImpactResult",
         system_prompt=(
-            "You are a News/Macro Impact Analyst. Decide whether to call targeted news or global macro news tools, "
-            "choose the search queries, inspect returned candidate evidence, reject low-relevance items, and return "
+            "You are a News/Macro Impact Analyst. Before tools are executed, first refine and optimize the exact "
+            "targeted and global news queries, inspect returned candidate evidence, reject low-relevance items, and return "
             "one structured JSON object. Avoid buy/sell/order/position-size language."
         ),
     ),
@@ -103,10 +109,11 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
     "technical": AgentContract(
         name="technical",
         team="analyst",
-        role="Compute deterministic technical state from OHLCV only.",
-        allowed_inputs=["RunRequest", "ohlcv"],
+        role="Read OHLCV, deterministic indicators, and public OKX SWAP microstructure context.",
+        allowed_inputs=["RunRequest", "ohlcv", "indicator_results", "market_context.okx_swap"],
         allowed_tools=[
             "route_to_vendor.get_market_data",
+            "route_to_vendor.get_swap_market_context",
             "RSI",
             "MACD",
             "ATR",
@@ -114,12 +121,16 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
             "realized volatility",
             "max drawdown",
             "support/resistance",
+            "funding_rate_reader",
+            "open_interest_reader",
+            "orderbook_imbalance_reader",
         ],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="TechnicalState",
         system_prompt=(
-            "You are a Technical Analyst. Use only normalized OHLCV and deterministic indicator tools. "
-            "Describe trend, momentum, volatility, and levels as research context only."
+            "You are a Technical Analyst. Use normalized OHLCV, deterministic indicator results, and public OKX "
+            "SWAP market context such as mark price, funding, open interest, price limits, and order book imbalance. "
+            "Describe trend, momentum, volatility, levels, and derivative market context as research context only."
         ),
     ),
     "analyst_team": AgentContract(

@@ -35,28 +35,22 @@ If your key file is named `notepad.env`, that is also loaded automatically.
 Supported key names:
 
 ```text
-OKX_API_KEY=
-OKX_SECRET_KEY=
-OKX_PASSPHRASE=
-OKX_DEMO=true
-OKX_READ_ONLY=true
-OKX_TRADEKIT_MODULES=market
+OKX_BASE_URL=https://www.okx.com
 TAVILY_API_KEY=
 FMP_API_KEY=
 FINNHUB_API_KEY=
 ```
 
-OKX market data is the preferred crypto market-data source. `ETH` with `asset_class=crypto`
-is resolved to OKX instruments such as `ETH-USDT-SWAP` before K-line retrieval, avoiding
-equity ticker collisions. Private OKX keys are used only for read-only account checks:
+OKX market data is the preferred SWAP market-data source. `ETH` with `asset_class=crypto`
+is resolved to OKX instruments such as `ETH-USDT-SWAP` before K-line retrieval, and exact
+OKX SWAP instrument IDs such as `BTC-USDT-SWAP` are used directly. The project uses public
+OKX SWAP market endpoints only: K-lines, ticker, mark price, funding rate/history, open
+interest, price limit, order book, and recent trades. Account, balance, position, and order
+APIs are out of scope.
 
 ```powershell
 uv run ird okx check
-uv run ird okx account
-uv run ird okx account --inst-type SWAP
 ```
-
-Keep `OKX_READ_ONLY=true`; this project does not place orders or produce position-sizing instructions.
 
 The baseline model target is Qwen3-8B Instruct/Chat. LoRA integration remains pending until training artifacts are produced; do not report improvement metrics until measured results exist.
 
@@ -142,9 +136,9 @@ The seven analysis/research/reporting agents call the configured LLM through the
 The workflow enforces tool boundaries by having each analyst call only its allowed dataflow tools. `Data Ingestion` prepares fixture data or a live-run data shell; in live mode, the analyst workers fetch their own inputs and the workflow later merges the resulting normalized data into `normalized_data.json`:
 
 - `Fundamental/Macro Analyst`: calls `get_fundamentals` and macro/news tools, then reads fundamental metadata, quote metadata, and macro/news context.
-- `News/Macro Impact Analyst`: uses an LLM-driven tool loop. The model sees `get_news` and `get_global_news`, chooses queries and call count within a bounded budget, then returns schema-validated admitted evidence only. `get_news` routes through Jin10, Finnhub, Yahoo Finance, and Tavily fallback. If the model tries to finish without any direct instrument-specific `get_news` call, the workflow enforces one targeted search and asks the LLM to evaluate those candidates before final output. If the LLM output must fall back to deterministic recovery, candidate events are filtered by instrument relevance before entering admitted news impact.
+- `News/Macro Impact Analyst`: first asks the LLM to generate an optimized query plan before any tool call is executed. The plan decides whether to call `get_news`, whether to call `get_global_news`, exact query wording, call count, and stop condition within a bounded budget. `get_news` routes through Jin10, Finnhub, Yahoo Finance, and Tavily fallback. If the model tries to finish without any direct instrument-specific `get_news` call, the workflow enforces one targeted search and asks the LLM to evaluate those candidates before final output. If the LLM output must fall back to deterministic recovery, candidate events are filtered by instrument relevance before entering admitted news impact.
 - `Sentiment Analyst`: calls `get_sentiment_inputs`, then reads sentiment inputs only.
-- `Technical Analyst`: calls `get_market_data`, calculates deterministic indicators in Python, then the LLM reads OHLCV and indicator results.
+- `Technical Analyst`: calls `get_market_data` and `get_swap_market_context`, calculates deterministic indicators in Python, then the LLM reads OHLCV, indicator results, and OKX public SWAP context.
 - `Bull/Bear Researchers`: analyst outputs only, no direct external provider calls.
 - `Research Reporter`: analyst/debate outputs and warnings only.
 

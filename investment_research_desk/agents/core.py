@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Literal, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from investment_research_desk.llm import LLMClient
 from investment_research_desk.schemas import (
@@ -32,6 +32,18 @@ from investment_research_desk.tools.indicators import (
 from investment_research_desk.agents.contracts import get_agent_contract
 
 TModel = TypeVar("TModel", bound=BaseModel)
+
+
+class NewsToolCallPlan(BaseModel):
+    name: Literal["get_news", "get_global_news"]
+    query: str
+    limit: int = Field(default=5, ge=1, le=10)
+    rationale: str = ""
+
+
+class NewsToolPlan(BaseModel):
+    calls: list[NewsToolCallPlan] = Field(default_factory=list, max_length=6)
+    stop_reason: str = ""
 
 
 BULLISH_TERMS = {
@@ -173,47 +185,44 @@ class NewsImpactAnalyst:
             symbol=request.symbol,
             asset_class=request.asset_class,
             horizon=request.horizon,
-            source_metadata={"provider_mode": "live", "tool_call_policy": "llm_driven_tool_loop"},
+            source_metadata={"provider_mode": "live", "tool_call_policy": "llm_planned_tool_calls"},
         )
         fallback = self._fallback(empty_data)
-        tools = _news_tool_specs()
-        contract = get_agent_contract(self.name)
-        user_prompt = (
-            f"Agent: {self.name}\n"
-            f"Instrument: {request.symbol}\n"
-            f"Asset class: {request.asset_class}\n"
-            f"Horizon: {request.horizon}\n"
-            "You decide whether to call tools, which query to use, how many times to call them, "
-            "whether to call get_global_news, and when to stop.\n"
-            "Treat tool outputs as candidate evidence, not admitted evidence. Reject unrelated company, sector, "
-            "or sponsored headlines unless you can explain a direct, sector, or macro link to the instrument.\n"
-            "Only include admitted evidence in dominant_events and evidence. If evidence is insufficient, say so "
-            "and lower confidence.\n\n"
-            "Available tools:\n"
-            "- get_news(query, limit): targeted symbol/topic news search.\n"
-            "- get_global_news(query, limit): broader macro/market news search.\n\n"
-            f"Hard tool budget: at most {max_total_tool_calls} calls total, "
-            f"at most {max_tool_calls_by_name['get_news']} get_news calls, "
-            f"and at most {max_tool_calls_by_name['get_global_news']} get_global_news calls.\n"
-            "Before concluding that instrument-specific news is insufficient, call get_news with the exact instrument "
-            "or a directly related asset/company query.\n\n"
-            "Return exactly one JSON object matching this Pydantic JSON schema after you finish tool calls. "
-            "Do not add fields outside the schema. Do not use buy/sell/order/position-sizing/profit-guarantee language.\n\n"
-            f"Pydantic JSON schema:\n{json.dumps(NewsImpactResult.model_json_schema(), ensure_ascii=False, default=str)}\n\n"
-            f"Candidate output JSON:\n{json.dumps(fallback.model_dump(mode='json'), ensure_ascii=False, default=str)}"
-        )
-        try:
-            raw = llm.chat_tools_json(contract.system_prompt, user_prompt, tools, execute_tool, max_rounds=max_rounds)
-            raw_tool_calls = raw.pop("_tool_calls", [])
-            if raw_tool_calls:
-                tool_calls = raw_tool_calls
-            if isinstance(raw.get("result"), dict):
-                raw = raw["result"]
-            result = NewsImpactResult.model_validate(raw)
-        except Exception:
-            result = self._fallback(
-                NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon, news_events=collected_events)
+        plan = self._plan_tool_queries(request, llm, max_total_tool_calls, max_tool_calls_by_name)
+        for planned in plan.calls[:max_total_tool_calls]:
+            execute_tool(
+                planned.name,
+                {
+                    "query": planned.query,
+                    "limit": planned.limit,
+                    "rationale": planned.rationale,
+                    "planned_by_llm": True,
+                },
             )
+        planned_data = NormalizedData(
+            symbol=request.symbol,
+            asset_class=request.asset_class,
+            horizon=request.horizon,
+            news_events=_dedupe_news_events(collected_events),
+        )
+        result = _llm_structured(
+            self.name,
+            llm,
+            {
+                "symbol": request.symbol,
+                "asset_class": request.asset_class,
+                "horizon": request.horizon,
+                "llm_query_plan": plan.model_dump(mode="json"),
+                "candidate_news_events": [event.model_dump(mode="json") for event in planned_data.news_events[:16]],
+                "instruction": (
+                    "The LLM first optimized/refined the news queries in llm_query_plan. "
+                    "Now evaluate the returned candidate events, reject unrelated items, and admit only evidence "
+                    "with a direct instrument, sector, or macro link."
+                ),
+            },
+            NewsImpactResult,
+            self._fallback(planned_data),
+        )
         if not _has_targeted_news_call(tool_calls, request):
             for query in _targeted_news_queries(request):
                 before_count = len(collected_events)
@@ -265,9 +274,10 @@ class NewsImpactAnalyst:
             news_events=_dedupe_news_events(collected_events),
             source_metadata={
                 "provider_mode": "live",
-                "tool_call_policy": "llm_driven_tool_loop_with_targeted_search_minimum",
+                "tool_call_policy": "llm_planned_tool_calls_with_targeted_search_minimum",
                 "minimum_targeted_search_enforced": bool(forced_contract_calls),
                 "filtered_candidate_count": filtered_candidate_count,
+                "llm_query_plan": plan.model_dump(mode="json"),
                 "agent_tool_status": {self.name: tool_status},
                 "warnings": tool_warnings,
                 "llm_tool_calls": tool_calls,
@@ -275,6 +285,57 @@ class NewsImpactAnalyst:
             },
         )
         return result, data
+
+    def _plan_tool_queries(
+        self,
+        request: RunRequest,
+        llm: LLMClient,
+        max_total_tool_calls: int,
+        max_tool_calls_by_name: dict[str, int],
+    ) -> NewsToolPlan:
+        contract = get_agent_contract(self.name)
+        default_plan = _default_news_tool_plan(request)
+        prompt = (
+            f"Agent: {self.name}\n"
+            f"Instrument: {request.symbol}\n"
+            f"Asset class: {request.asset_class}\n"
+            f"Horizon: {request.horizon}\n\n"
+            "Before any news tool is executed, optimize and refine the exact tool queries. "
+            "Decide whether to call get_news, whether to call get_global_news, how many calls are useful, "
+            "and when enough evidence should be collected. Return only a query plan; do not write the final report yet.\n\n"
+            "Available tools:\n"
+            "- get_news(query, limit): targeted symbol, asset, issuer, sector, or instrument-specific news.\n"
+            "- get_global_news(query, limit): broader macro, liquidity, policy, rates, cross-asset, or market-structure news.\n\n"
+            f"Hard tool budget: at most {max_total_tool_calls} calls total, "
+            f"at most {max_tool_calls_by_name['get_news']} get_news calls, "
+            f"and at most {max_tool_calls_by_name['get_global_news']} get_global_news calls.\n"
+            "Include a direct instrument-specific get_news query unless the instrument is invalid. "
+            "For crypto SWAP instruments, include both exact instrument context and underlying asset news when useful.\n\n"
+            f"Pydantic JSON schema:\n{json.dumps(NewsToolPlan.model_json_schema(), ensure_ascii=False, default=str)}\n\n"
+            f"Candidate output JSON:\n{json.dumps(default_plan.model_dump(mode='json'), ensure_ascii=False, default=str)}"
+        )
+        try:
+            raw = llm.chat_json(contract.system_prompt, prompt)
+            if isinstance(raw.get("result"), dict):
+                raw = raw["result"]
+            plan = NewsToolPlan.model_validate(raw)
+        except Exception:
+            plan = default_plan
+        bounded: list[NewsToolCallPlan] = []
+        counts = {"get_news": 0, "get_global_news": 0}
+        for call in plan.calls:
+            if len(bounded) >= max_total_tool_calls:
+                break
+            if call.name not in counts:
+                continue
+            if counts[call.name] >= max_tool_calls_by_name[call.name]:
+                continue
+            query = call.query.strip()
+            if not query:
+                continue
+            bounded.append(call.model_copy(update={"query": query, "limit": min(max(call.limit, 1), 10)}))
+            counts[call.name] += 1
+        return NewsToolPlan(calls=bounded, stop_reason=plan.stop_reason)
 
     def _fallback(self, data: NormalizedData) -> NewsImpactResult:
         dominant = [event.title for event in data.news_events[:5]]
@@ -359,6 +420,14 @@ class TechnicalAnalyst:
         momentum = _momentum_state(rsi_14, macd_hist)
         view = _technical_view(trend, rsi_14, macd_hist)
         vol_regime = "elevated" if rv is not None and rv > 0.7 else "normal"
+        swap_context = data.market_context.get("okx_swap") if isinstance(data.market_context, dict) else {}
+        if not isinstance(swap_context, dict):
+            swap_context = {}
+        mark_price = _nested_float(swap_context, "mark_price", "markPx")
+        index_price = _nested_float(swap_context, "index_ticker", "idxPx")
+        funding_rate = _nested_float(swap_context, "funding_rate", "fundingRate")
+        open_interest = _nested_float(swap_context, "open_interest", "oi")
+        orderbook_imbalance = _float_or_none(swap_context.get("orderbook_imbalance"))
         fallback = TechnicalState(
             technical_view=view,
             trend=trend,
@@ -370,9 +439,15 @@ class TechnicalAnalyst:
             bollinger_state=bollinger_state(bars),
             realized_volatility=rv,
             max_drawdown=dd,
+            mark_price=mark_price,
+            index_price=index_price,
+            funding_rate=funding_rate,
+            open_interest=open_interest,
+            orderbook_imbalance=orderbook_imbalance,
+            swap_context_summary=_swap_context_summary(swap_context),
             support_zones=supports,
             resistance_zones=resistances,
-            confidence=0.78 if len(bars) >= 26 else 0.45,
+            confidence=0.82 if len(bars) >= 26 and swap_context else 0.78 if len(bars) >= 26 else 0.45,
         )
         return _llm_structured(
             self.name,
@@ -382,7 +457,12 @@ class TechnicalAnalyst:
                 "asset_class": data.asset_class,
                 "indicator_results": fallback.model_dump(mode="json"),
                 "recent_ohlcv": [bar.model_dump(mode="json") for bar in bars[-10:]],
-                "instruction": "Read the deterministic indicator results and classify the technical state. Do not recalculate indicators.",
+                "swap_market_context": swap_context,
+                "instruction": (
+                    "Read the deterministic indicator results and OKX public SWAP market context. "
+                    "Do not recalculate indicators. Interpret funding, open interest, mark/index spread, price limits, "
+                    "recent trades, and orderbook imbalance as derivative market context only."
+                ),
             },
             TechnicalState,
             fallback,
@@ -509,7 +589,11 @@ class ResearchReporter:
             fundamental_summary="; ".join(fundamental.key_drivers[:2] + fundamental.concerns[:2]),
             news_impact_summary=news.impact_logic,
             sentiment_summary=f"Market mood is {sentiment.crowd_mood}; label={sentiment.sentiment_label}; score={sentiment.sentiment_score}.",
-            technical_summary=f"Trend={technical.trend}; momentum={technical.momentum}; RSI={technical.rsi_14}; MACD={technical.macd_state}.",
+            technical_summary=(
+                f"Trend={technical.trend}; momentum={technical.momentum}; RSI={technical.rsi_14}; "
+                f"MACD={technical.macd_state}; OKX_SWAP funding={technical.funding_rate}; "
+                f"open_interest={technical.open_interest}; orderbook_imbalance={technical.orderbook_imbalance}."
+            ),
             constructive_case=constructive,
             risk_case=risk,
             key_drivers=key_drivers,
@@ -592,6 +676,11 @@ def _preserve_deterministic_fields(agent_name: str, result: TModel, fallback: TM
                 "bollinger_state": fallback.bollinger_state,
                 "realized_volatility": fallback.realized_volatility,
                 "max_drawdown": fallback.max_drawdown,
+                "mark_price": fallback.mark_price,
+                "index_price": fallback.index_price,
+                "funding_rate": fallback.funding_rate,
+                "open_interest": fallback.open_interest,
+                "orderbook_imbalance": fallback.orderbook_imbalance,
                 "support_zones": fallback.support_zones,
                 "resistance_zones": fallback.resistance_zones,
             }
@@ -672,6 +761,27 @@ def _targeted_news_queries(request: RunRequest) -> list[str]:
     else:
         queries.append(f"{request.symbol} market news")
     return _dedupe(queries)
+
+
+def _default_news_tool_plan(request: RunRequest) -> NewsToolPlan:
+    calls = [
+        NewsToolCallPlan(
+            name="get_news",
+            query=query,
+            limit=5,
+            rationale="minimum direct instrument-specific evidence collection",
+        )
+        for query in _targeted_news_queries(request)[:2]
+    ]
+    calls.append(
+        NewsToolCallPlan(
+            name="get_global_news",
+            query=f"{request.symbol} {request.asset_class} macro market liquidity risk",
+            limit=5,
+            rationale="broader macro and cross-asset context",
+        )
+    )
+    return NewsToolPlan(calls=calls, stop_reason="default bounded plan")
 
 
 def _instrument_related_news_events(events: list[NewsEvent], request: RunRequest) -> list[NewsEvent]:
@@ -768,6 +878,40 @@ def _macd_state(hist: float | None) -> str:
     if hist < -0.2:
         return "negative"
     return "negative_flattening"
+
+
+def _nested_float(payload: dict[str, Any], outer: str, inner: str) -> float | None:
+    value = payload.get(outer)
+    if not isinstance(value, dict):
+        return None
+    return _float_or_none(value.get(inner))
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _swap_context_summary(context: dict[str, Any]) -> str | None:
+    if not context:
+        return None
+    inst_id = context.get("inst_id", "unknown")
+    funding = _nested_float(context, "funding_rate", "fundingRate")
+    open_interest = _nested_float(context, "open_interest", "oi")
+    imbalance = _float_or_none(context.get("orderbook_imbalance"))
+    spread = _float_or_none(context.get("mark_index_spread"))
+    parts = [f"OKX public SWAP context for {inst_id}"]
+    if funding is not None:
+        parts.append(f"funding_rate={funding}")
+    if open_interest is not None:
+        parts.append(f"open_interest={open_interest}")
+    if imbalance is not None:
+        parts.append(f"orderbook_imbalance={imbalance}")
+    if spread is not None:
+        parts.append(f"mark_index_spread={spread}")
+    return "; ".join(parts)
 
 
 def _momentum_state(rsi_14: float | None, macd_hist: float | None) -> str:

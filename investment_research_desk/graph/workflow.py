@@ -360,16 +360,23 @@ class ResearchWorkflow:
             return data
         if agent_name == "technical":
             market_result = route_to_vendor("get_market_data", self.settings, request)
+            swap_context_result = route_to_vendor("get_swap_market_context", self.settings, request)
             return NormalizedData(
                 symbol=request.symbol,
                 asset_class=request.asset_class,
                 horizon=request.horizon,
                 ohlcv=market_result.data,
+                market_context={"okx_swap": swap_context_result.data},
                 source_metadata={
                     "provider_mode": "live",
                     "tool_call_policy": "agent_called_allowed_tools",
-                    "agent_tool_status": {agent_name: {"get_market_data": market_result.status}},
-                    "warnings": market_result.warnings,
+                    "agent_tool_status": {
+                        agent_name: {
+                            "get_market_data": market_result.status,
+                            "get_swap_market_context": swap_context_result.status,
+                        }
+                    },
+                    "warnings": market_result.warnings + swap_context_result.warnings,
                 },
             )
         if agent_name == "news_impact":
@@ -700,6 +707,9 @@ class ResearchWorkflow:
             "sentiment", NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon)
         ).sentiment_inputs
         ohlcv = slices.get("technical", NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon)).ohlcv
+        market_context = slices.get(
+            "technical", NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon)
+        ).market_context
         source_metadata: dict[str, Any] = {
             "provider_mode": seed_data.source_metadata.get("provider_mode", "live"),
             "tool_call_policy": "analyst_agents_called_allowed_tools",
@@ -721,6 +731,7 @@ class ResearchWorkflow:
             ohlcv=ohlcv,
             news_events=news_events,
             sentiment_inputs=sentiment_inputs,
+            market_context=market_context,
             source_metadata=source_metadata,
         )
 
@@ -755,6 +766,7 @@ class ResearchWorkflow:
                 asset_class=data.asset_class,
                 horizon=data.horizon,
                 ohlcv=data.ohlcv,
+                market_context=data.market_context,
             )
         raise ValueError(f"No data scope registered for agent {agent_name}")
 
@@ -858,6 +870,12 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"- ATR 14: {technical.atr_14}\n"
             f"- Realized volatility: {technical.realized_volatility}\n"
             f"- Max drawdown: {technical.max_drawdown}\n"
+            f"- OKX mark price: {technical.mark_price}\n"
+            f"- OKX index price: {technical.index_price}\n"
+            f"- OKX funding rate: {technical.funding_rate}\n"
+            f"- OKX open interest: {technical.open_interest}\n"
+            f"- OKX orderbook imbalance: {technical.orderbook_imbalance}\n"
+            f"- SWAP context: {technical.swap_context_summary or 'None'}\n"
             f"- Support zones: {', '.join(map(str, technical.support_zones)) or 'None'}\n"
             f"- Resistance zones: {', '.join(map(str, technical.resistance_zones)) or 'None'}\n"
             f"- Confidence: {technical.confidence}",
@@ -881,6 +899,7 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"### Uncertainty Factors\n{_md_list(final.uncertainty_factors)}",
             "## Data And Run Metadata\n"
             f"- OHLCV bars: {len(data.ohlcv)}\n"
+            f"- Market context sections: {', '.join(data.market_context.keys()) or 'None'}\n"
             f"- News events: {len(data.news_events)}\n"
             f"- Sentiment inputs: {len(data.sentiment_inputs)}\n"
             f"- Provider mode: {data.source_metadata.get('provider_mode', 'unknown')}\n"

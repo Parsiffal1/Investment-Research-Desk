@@ -101,6 +101,20 @@ def test_live_analysts_call_their_own_dataflow_tools(tmp_path: Path, monkeypatch
                 for i in range(30)
             ]
             return VendorRouteResult(data=bars, status={"fake_market": "success"})
+        if method == "get_swap_market_context":
+            return VendorRouteResult(
+                data={
+                    "provider": "okx",
+                    "scope": "public_swap_market_only",
+                    "inst_id": "FAKE-USDT-SWAP",
+                    "mark_price": {"markPx": "130.5"},
+                    "index_ticker": {"idxPx": "130.0"},
+                    "funding_rate": {"fundingRate": "0.0001"},
+                    "open_interest": {"oi": "1000"},
+                    "orderbook_imbalance": 0.2,
+                },
+                status={"fake_okx": "success"},
+            )
         if method == "get_news":
             return VendorRouteResult(
                 data=[
@@ -145,12 +159,15 @@ def test_live_analysts_call_their_own_dataflow_tools(tmp_path: Path, monkeypatch
     state = workflow.run(request, checkpoint=True)
 
     assert "get_market_data" in calls
+    assert "get_swap_market_context" in calls
     assert "get_sentiment_inputs" in calls
     assert "get_fundamentals" in calls
     assert calls.count("get_news") >= 2
     assert "get_global_news" in calls
     assert state["data"]["source_metadata"]["tool_call_policy"] == "analyst_agents_called_allowed_tools"
     assert state["data"]["source_metadata"]["agent_tool_status"]["technical"]["get_market_data"] == {"fake_market": "success"}
+    assert state["data"]["source_metadata"]["agent_tool_status"]["technical"]["get_swap_market_context"] == {"fake_okx": "success"}
+    assert state["technical"]["funding_rate"] == 0.0001
     assert state["data"]["source_metadata"]["agent_tool_status"]["fundamental_macro"]["get_fundamentals"] == {
         "fake_fundamentals": "success"
     }

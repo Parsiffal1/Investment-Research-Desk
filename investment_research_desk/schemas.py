@@ -71,6 +71,7 @@ class NormalizedData(BaseModel):
     ohlcv: list[OHLCVBar] = Field(default_factory=list)
     news_events: list[NewsEvent] = Field(default_factory=list)
     sentiment_inputs: list[SentimentInput] = Field(default_factory=list)
+    market_context: dict[str, Any] = Field(default_factory=dict)
     source_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -110,6 +111,12 @@ class TechnicalState(BaseModel):
     bollinger_state: str
     realized_volatility: float | None = None
     max_drawdown: float | None = None
+    mark_price: float | None = None
+    index_price: float | None = None
+    funding_rate: float | None = None
+    open_interest: float | None = None
+    orderbook_imbalance: float | None = None
+    swap_context_summary: str | None = None
     support_zones: list[float] = Field(default_factory=list)
     resistance_zones: list[float] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
@@ -173,4 +180,3 @@ class RunMetrics(BaseModel):
     json_valid: bool = True
     schema_valid: bool = True
     guardrail_violations: list[str] = Field(default_factory=list)
-

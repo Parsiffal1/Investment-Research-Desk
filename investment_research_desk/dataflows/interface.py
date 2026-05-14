@@ -19,7 +19,7 @@ from investment_research_desk.security import redact_secrets
 
 
 TOOLS_CATEGORIES = {
-    "market_data": {"description": "OHLCV market data", "tools": ["get_market_data"]},
+    "market_data": {"description": "OHLCV and public SWAP market context", "tools": ["get_market_data", "get_swap_market_context"]},
     "news_data": {"description": "Ticker and macro news/events", "tools": ["get_news", "get_global_news"]},
     "sentiment_data": {"description": "Search/social/commentary sentiment inputs", "tools": ["get_sentiment_inputs"]},
     "fundamental_data": {"description": "Quote, profile, and company context", "tools": ["get_fundamentals"]},
@@ -93,14 +93,7 @@ def _fallback_chain(primary: list[str], available: list[str]) -> list[str]:
 
 
 def _vendor_methods(settings: Settings) -> dict[str, dict[str, Callable[[RunRequest], Any]]]:
-    okx = OkxMarketDataProvider(
-        settings.okx_base_url,
-        api_key=settings.okx_api_key,
-        secret_key=settings.okx_secret_key,
-        passphrase=settings.okx_passphrase,
-        demo=settings.okx_demo,
-        read_only=settings.okx_read_only,
-    )
+    okx = OkxMarketDataProvider(settings.okx_base_url)
     fmp = FmpProvider(settings.fmp_api_key, settings.fmp_base_url)
     finnhub = FinnhubProvider(settings.finnhub_api_key, settings.finnhub_base_url)
     tavily = TavilySearchProvider(settings.tavily_api_key, settings.tavily_base_url)
@@ -110,6 +103,7 @@ def _vendor_methods(settings: Settings) -> dict[str, dict[str, Callable[[RunRequ
     reddit = RedditProvider()
     return {
         "get_market_data": {"okx": okx.fetch_ohlcv, "fmp": fmp.fetch_ohlcv, "yahoo_finance": yahoo.fetch_ohlcv},
+        "get_swap_market_context": {"okx": okx.fetch_swap_market_context},
         "get_news": {
             "jin10": jin10.fetch_news,
             "finnhub": finnhub.fetch_news,
@@ -148,11 +142,11 @@ def _finnhub_fundamentals(provider: FinnhubProvider, request: RunRequest) -> dic
 
 
 def _initial_data(method: str) -> Any:
-    return {} if method == "get_fundamentals" else []
+    return {} if method in {"get_fundamentals", "get_swap_market_context"} else []
 
 
 def _merge_data(method: str, current: Any, value: Any) -> Any:
-    if method == "get_fundamentals":
+    if method in {"get_fundamentals", "get_swap_market_context"}:
         merged = dict(current)
         if isinstance(value, dict):
             for key, item in value.items():

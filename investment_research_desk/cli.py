@@ -51,7 +51,7 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Configuration and runtime checks")
 app.add_typer(config_app, name="config")
-okx_app = typer.Typer(help="OKX read-only market/account checks")
+okx_app = typer.Typer(help="OKX public SWAP market checks")
 app.add_typer(okx_app, name="okx")
 
 
@@ -513,16 +513,13 @@ def config_check() -> None:
 @okx_app.command("check")
 def okx_check() -> None:
     settings = load_settings()
-    provider = _make_okx_provider(settings)
-    table = Table(title="OKX Read-Only Check")
+    provider = OkxMarketDataProvider(settings.okx_base_url)
+    table = Table(title="OKX Public SWAP Market Check")
     table.add_column("Item")
     table.add_column("Status")
     table.add_column("Detail")
     table.add_row("Base URL", "OK", settings.okx_base_url)
-    table.add_row("Profile", settings.okx_profile, f"demo={settings.okx_demo}; site={settings.okx_site}")
-    table.add_row("Read-only", "OK" if settings.okx_read_only else "WARN", str(settings.okx_read_only))
-    table.add_row("TradeKit modules", settings.okx_tradekit_modules, "market recommended for this project")
-    table.add_row("Private credentials", "OK" if provider.private_available() else "WARN", "configured" if provider.private_available() else "missing")
+    table.add_row("Scope", "OK", "public SWAP market data only; account/position APIs are disabled")
     try:
         request = build_run_request(
             symbol="ETH",
@@ -535,44 +532,14 @@ def okx_check() -> None:
         )
         inst_id = provider.resolve_inst_id(request)
         bars = provider.fetch_ohlcv(request)
+        context = provider.fetch_swap_market_context(request)
         table.add_row("Market data", "OK" if bars else "WARN", f"ETH resolved to {inst_id}; bars={len(bars)}")
+        table.add_row("Funding", "OK" if context.get("funding_rate") else "WARN", str(context.get("funding_rate") or "missing"))
+        table.add_row("Open interest", "OK" if context.get("open_interest") else "WARN", str(context.get("open_interest") or "missing"))
+        table.add_row("Order book", "OK" if context.get("orderbook") else "WARN", f"imbalance={context.get('orderbook_imbalance')}")
     except Exception as exc:
-        table.add_row("Market data", "WARN", _redact_okx_error(str(exc), settings))
-    if provider.private_available():
-        try:
-            provider.account_config()
-            table.add_row("Private read", "OK", "account config reachable")
-        except Exception as exc:
-            table.add_row("Private read", "WARN", _redact_okx_error(str(exc), settings))
+        table.add_row("Market data", "WARN", str(exc))
     console.print(table)
-
-
-@okx_app.command("account")
-def okx_account(
-    ccy: Optional[str] = typer.Option(None, "--ccy", help="Optional comma-separated balance currencies, e.g. BTC,ETH,USDT."),
-    inst_type: Optional[str] = typer.Option(None, "--inst-type", help="Optional position instrument type: MARGIN, SWAP, FUTURES, OPTION."),
-    inst_id: Optional[str] = typer.Option(None, "--inst-id", help="Optional OKX instrument ID, e.g. ETH-USDT-SWAP."),
-    json_output: bool = typer.Option(False, "--json", help="Print raw JSON returned by OKX."),
-) -> None:
-    settings = load_settings()
-    provider = _make_okx_provider(settings)
-    if not provider.private_available():
-        _exit_with_error(
-            "OKX private API credentials are not configured.",
-            hints=["Fill OKX_API_KEY, OKX_SECRET_KEY, and OKX_PASSPHRASE in .env.", "Keep OKX_READ_ONLY=true for this project."],
-        )
-    try:
-        balance = provider.account_balance(ccy=ccy)
-        positions = provider.positions(inst_type=inst_type, inst_id=inst_id)
-        risk = provider.account_position_risk(inst_type=inst_type)
-    except Exception as exc:
-        _exit_with_error("OKX account read failed.", hints=[_redact_okx_error(str(exc), settings)])
-    if json_output:
-        console.print_json(data={"balance": balance, "positions": positions, "risk": risk})
-        return
-    console.print(_okx_balance_table(balance))
-    console.print(_okx_positions_table(positions))
-    console.print(_okx_risk_table(risk))
 
 
 def _welcome_panel() -> Panel:
@@ -600,101 +567,6 @@ def _workflow_panel() -> Panel:
     table.add_row("III.", "Research Reporter: structured context, brief, trace, metrics")
     table.add_row("IV.", "final_market_context_cache: downstream research context only")
     return Panel(table, title="Workflow", border_style="cyan")
-
-
-def _make_okx_provider(settings) -> OkxMarketDataProvider:
-    return OkxMarketDataProvider(
-        settings.okx_base_url,
-        api_key=settings.okx_api_key,
-        secret_key=settings.okx_secret_key,
-        passphrase=settings.okx_passphrase,
-        demo=settings.okx_demo,
-        read_only=settings.okx_read_only,
-    )
-
-
-def _redact_okx_error(text: str, settings) -> str:
-    redacted = text
-    for secret in [settings.okx_api_key, settings.okx_secret_key, settings.okx_passphrase]:
-        if secret:
-            redacted = redacted.replace(secret, "***")
-    return redacted
-
-
-def _okx_balance_table(payload: dict[str, Any]) -> Table:
-    table = Table(title="OKX Account Balance")
-    table.add_column("Currency")
-    table.add_column("Equity")
-    table.add_column("Available")
-    table.add_column("USD Equity")
-    table.add_column("Unrealized PnL")
-    rows = []
-    for account in payload.get("data", []):
-        for detail in account.get("details", []):
-            rows.append(
-                [
-                    str(detail.get("ccy", "")),
-                    str(detail.get("eq", "")),
-                    str(detail.get("availEq") or detail.get("availBal") or ""),
-                    str(detail.get("eqUsd", "")),
-                    str(detail.get("upl", "")),
-                ]
-            )
-    if not rows:
-        table.add_row("-", "-", "-", "-", "No non-zero balances returned.")
-    for row in rows:
-        table.add_row(*row)
-    return table
-
-
-def _okx_positions_table(payload: dict[str, Any]) -> Table:
-    table = Table(title="OKX Positions")
-    table.add_column("Instrument")
-    table.add_column("Type")
-    table.add_column("Side")
-    table.add_column("Position")
-    table.add_column("Avg Px")
-    table.add_column("Mark Px")
-    table.add_column("Notional USD")
-    table.add_column("UPL")
-    rows = payload.get("data", [])
-    if not rows:
-        table.add_row("-", "-", "-", "-", "-", "-", "-", "No open positions returned.")
-        return table
-    for item in rows:
-        table.add_row(
-            str(item.get("instId", "")),
-            str(item.get("instType", "")),
-            str(item.get("posSide", "")),
-            str(item.get("pos", "")),
-            str(item.get("avgPx", "")),
-            str(item.get("markPx", "")),
-            str(item.get("notionalUsd", "")),
-            str(item.get("upl", "")),
-        )
-    return table
-
-
-def _okx_risk_table(payload: dict[str, Any]) -> Table:
-    table = Table(title="OKX Account / Position Risk")
-    table.add_column("Currency")
-    table.add_column("Equity")
-    table.add_column("Adjusted Equity")
-    table.add_column("Margin Ratio")
-    table.add_column("Details")
-    rows = payload.get("data", [])
-    if not rows:
-        table.add_row("-", "-", "-", "-", "No account risk rows returned.")
-        return table
-    for item in rows:
-        table.add_row(
-            str(item.get("ccy", "")),
-            str(item.get("eq", "")),
-            str(item.get("adjEq", "")),
-            str(item.get("mgnRatio", "")),
-            f"positions={len(item.get('posData', []) or [])}",
-        )
-    return table
 
 
 def _step_panel(step: int, title: str, prompt: str, default: str | None = None) -> Panel:
@@ -780,6 +652,10 @@ def _markdown_for_agent_result(agent_name: str, output: dict[str, Any]) -> str:
             f"- Volatility regime: {output.get('volatility_regime', 'unknown')}\n"
             f"- RSI 14: {output.get('rsi_14', 'unknown')}\n"
             f"- MACD: {output.get('macd_state', 'unknown')}\n"
+            f"- OKX mark price: {output.get('mark_price', 'unknown')}\n"
+            f"- OKX funding rate: {output.get('funding_rate', 'unknown')}\n"
+            f"- OKX open interest: {output.get('open_interest', 'unknown')}\n"
+            f"- OKX orderbook imbalance: {output.get('orderbook_imbalance', 'unknown')}\n"
             f"- Support zones: {', '.join(map(str, output.get('support_zones') or [])) or 'None'}\n"
             f"- Resistance zones: {', '.join(map(str, output.get('resistance_zones') or [])) or 'None'}"
         )

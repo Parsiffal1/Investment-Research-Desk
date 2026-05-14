@@ -73,16 +73,19 @@ def test_news_analyst_uses_llm_driven_tool_loop():
     assert result.dominant_events
     assert {method for method, _ in calls} == {"get_news", "get_global_news"}
     assert ("get_news", "BTC-USDT-SWAP") in calls
-    assert data.source_metadata["tool_call_policy"] == "llm_driven_tool_loop_with_targeted_search_minimum"
-    assert data.source_metadata["minimum_targeted_search_enforced"] is True
+    assert data.source_metadata["tool_call_policy"] == "llm_planned_tool_calls_with_targeted_search_minimum"
+    assert data.source_metadata["minimum_targeted_search_enforced"] is False
+    assert data.source_metadata["llm_query_plan"]["calls"]
     assert data.source_metadata["llm_tool_calls"]
 
 
 def test_news_analyst_forces_targeted_search_when_llm_skips_tools():
     class NoToolLLM(FakeLLMClient):
-        def chat_tools_json(self, system, user, tools, execute_tool, max_rounds=4):
+        def chat_json(self, system, user):
             self.calls.append({"system": system, "user": user})
-            return {"result": {"not_schema": True}, "_tool_calls": []}
+            if "NewsToolPlan" in user:
+                return {"calls": [], "stop_reason": "skip"}
+            return super().chat_json(system, user)
 
     llm = NoToolLLM()
     request = RunRequest(symbol="NVDA", asset_class="equity", horizon="short_term", llm_provider="fake")
@@ -113,9 +116,11 @@ def test_news_analyst_forces_targeted_search_when_llm_skips_tools():
 
 def test_news_forced_search_fallback_filters_unrelated_provider_metadata():
     class NoToolLLM(FakeLLMClient):
-        def chat_tools_json(self, system, user, tools, execute_tool, max_rounds=4):
+        def chat_json(self, system, user):
             self.calls.append({"system": system, "user": user})
-            return {"result": {"not_schema": True}, "_tool_calls": []}
+            if "NewsToolPlan" in user:
+                return {"calls": [], "stop_reason": "skip"}
+            return super().chat_json(system, user)
 
     llm = NoToolLLM()
     request = RunRequest(symbol="NVDA", asset_class="equity", horizon="short_term", llm_provider="fake")
