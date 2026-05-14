@@ -1,6 +1,7 @@
 from typer.testing import CliRunner
 
 from investment_research_desk.cli import app
+from investment_research_desk.cli_contract import build_run_request
 
 
 runner = CliRunner()
@@ -55,6 +56,32 @@ def test_cli_report_rejects_missing_symbol_for_live_run(tmp_path):
 
     assert result.exit_code == 2
     assert "--symbol is required" in result.output
+
+
+def test_interactive_style_symbol_normalization_and_asset_inference():
+    equity = build_run_request(
+        symbol=" nvda ",
+        asset_class=None,
+        horizon="short_term",
+        research_depth="standard",
+        fixture=None,
+        llm_provider="ollama",
+        model="qwen3:8b",
+    )
+    crypto = build_run_request(
+        symbol=" btc-usdt-swap ",
+        asset_class="auto",
+        horizon="short_term",
+        research_depth="standard",
+        fixture=None,
+        llm_provider="ollama",
+        model="qwen3:8b",
+    )
+
+    assert equity.symbol == "NVDA"
+    assert equity.asset_class == "equity"
+    assert crypto.symbol == "BTC-USDT-SWAP"
+    assert crypto.asset_class == "crypto"
 
 
 def test_cli_runs_lists_checkpoint(tmp_path):

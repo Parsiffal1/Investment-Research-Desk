@@ -220,27 +220,24 @@ def _collect_interactive_contract() -> CLIInteractionContract:
         return CLIInteractionContract(mode="resume", request=None, checkpoint=True, resume_run_id=run_id, runs_dir=runs_dir)
 
     symbol: str | None = None
-    asset_class: str | AssetClassOption = AssetClassOption.crypto
     horizon: str | HorizonOption = HorizonOption.short_term
 
-    console.print(_step_panel(2, "Instrument", "Enter the exact research symbol. Examples: NVDA, AAPL, BTC-USDT-SWAP.", "BTC-USDT-SWAP"))
+    console.print(_step_panel(2, "Instrument", "Enter the exact symbol to analyze. Examples: NVDA, AAPL, BTC-USDT-SWAP.", "BTC-USDT-SWAP"))
     symbol = questionary.text(
         "Symbol",
         default="BTC-USDT-SWAP",
         validate=lambda value: bool(value.strip()) or "Symbol is required.",
         style=CLI_STYLE,
     ).ask()
-    console.print(_step_panel(3, "Asset Class", "Select the asset class so providers, prompts, and validation use the right contract."))
-    asset_class = _enum_select("Asset class", AssetClassOption, AssetClassOption.crypto)
-    console.print(_step_panel(4, "Research Horizon", "Select the time horizon for analysis framing and prompt context.", HorizonOption.short_term.value))
+    console.print(_step_panel(3, "Research Horizon", "Select the time horizon for analysis framing and prompt context.", HorizonOption.short_term.value))
     horizon = _enum_select("Horizon", HorizonOption, HorizonOption.short_term)
-    console.print(_step_panel(5, "Research Depth", "Select how much reasoning/debate depth to request from the workflow.", ResearchDepthOption.standard.value))
+    console.print(_step_panel(4, "Research Depth", "Select how much reasoning/debate depth to request from the workflow.", ResearchDepthOption.standard.value))
     research_depth = _enum_select("Research depth", ResearchDepthOption, ResearchDepthOption.standard)
 
     try:
         request = build_run_request(
             symbol=symbol,
-            asset_class=asset_class,
+            asset_class="auto",
             horizon=horizon,
             research_depth=research_depth,
             fixture=None,
@@ -285,7 +282,7 @@ def demo(
 @app.command()
 def report(
     symbol: Optional[str] = typer.Option(None, "--symbol", help="Instrument symbol, e.g. BTC-USDT-SWAP."),
-    asset_class: AssetClassOption = typer.Option(AssetClassOption.crypto, "--asset-class", help="Asset class."),
+    asset_class: Optional[AssetClassOption] = typer.Option(None, "--asset-class", help="Optional provider route override."),
     horizon: HorizonOption = typer.Option(HorizonOption.short_term, "--horizon", help="Research horizon."),
     research_depth: ResearchDepthOption = typer.Option(ResearchDepthOption.standard, "--research-depth", help="quick, standard, or deep."),
     fixture: Optional[str] = typer.Option(None, "--fixture", help="Run from frozen fixture data."),
@@ -313,7 +310,7 @@ def report(
 
 def run_report(
     symbol: str | None,
-    asset_class: str | AssetClassOption,
+    asset_class: str | AssetClassOption | None,
     horizon: str | HorizonOption,
     research_depth: str | ResearchDepthOption,
     fixture: str | None,
@@ -412,7 +409,7 @@ def _run_workflow(request, checkpoint: bool, resume: str | None, clear_checkpoin
 @app.command()
 def batch(
     symbols: str = typer.Option(..., "--symbols", help="Comma-separated instrument symbols."),
-    asset_class: AssetClassOption = typer.Option(AssetClassOption.crypto, "--asset-class"),
+    asset_class: Optional[AssetClassOption] = typer.Option(None, "--asset-class", help="Optional provider route override."),
     horizon: HorizonOption = typer.Option(HorizonOption.short_term, "--horizon"),
     research_depth: ResearchDepthOption = typer.Option(ResearchDepthOption.standard, "--research-depth"),
     llm_provider: LLMProviderOption = typer.Option(LLMProviderOption.auto, "--llm-provider"),

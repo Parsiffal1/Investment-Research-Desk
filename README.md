@@ -20,7 +20,7 @@ For Ollama-backed local inference, set:
 ```powershell
 $env:IRD_OLLAMA_BASE_URL="http://localhost:11434/v1"
 $env:IRD_OLLAMA_MODEL="qwen3:8b"
-uv run ird report --symbol NVDA --asset-class equity --horizon short_term --llm-provider ollama
+uv run ird report --symbol NVDA --horizon short_term --llm-provider ollama
 ```
 
 API keys can be placed in a local `.env` file in the project root. The loader also accepts `notepad.env` for this workspace. Start from `.env.example` and do not commit real keys:
@@ -73,7 +73,7 @@ The baseline model target is Qwen3-8B Instruct/Chat. LoRA integration remains pe
 
 ```text
 New research report
-  -> choose symbol, asset class, horizon, research depth
+  -> enter exact symbol, choose horizon and research depth
   -> review the run contract
   -> run Analyst Team -> Bull/Bear Research Debate -> Research Reporter
 
@@ -88,12 +88,11 @@ View run history / System check
 Validated option domains:
 
 ```text
-asset_class: crypto, precious_metal, equity_index, commodity, fx, equity, other
 horizon: intraday, short_term, swing, medium_term
 research_depth: quick, standard, deep
 ```
 
-The interactive flow always uses the configured Ollama model, defaulting to `qwen3:8b`, and saves checkpoints automatically. Demo and fake-LLM execution are available through `ird demo` and explicit non-interactive `ird report` flags only.
+The interactive flow follows TradingAgents' ticker-input assumption: users enter the exact symbol they want analyzed. It only trims whitespace and uppercases the symbol. Internally, obvious SWAP/crypto symbols are routed as crypto; otherwise the default asset class is equity. The configured Ollama model defaults to `qwen3:8b`, and checkpoints are saved automatically. Demo and fake-LLM execution are available through `ird demo` and explicit non-interactive `ird report` flags only.
 
 Errors are reported as `CLI Contract Error` panels with actionable hints. Live Ollama runs preflight `http://localhost:11434/v1/models` before the workflow starts.
 

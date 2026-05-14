@@ -96,7 +96,7 @@ def normalize_enum_value(value: str | Enum, allowed: tuple[str, ...], field_name
 def build_run_request(
     *,
     symbol: str | None,
-    asset_class: str | AssetClassOption,
+    asset_class: str | AssetClassOption | None,
     horizon: str | HorizonOption,
     research_depth: str | ResearchDepthOption,
     fixture: str | None,
@@ -117,10 +117,16 @@ def build_run_request(
         normalized_symbol = (symbol or "").strip().upper()
         if not normalized_symbol:
             raise ValueError("--symbol is required when --fixture is not used")
+        raw_asset_class = asset_class.value if isinstance(asset_class, Enum) else asset_class
+        normalized_asset_class = (
+            infer_asset_class(normalized_symbol)
+            if raw_asset_class in {"auto", None, ""}
+            else normalize_enum_value(asset_class, ALLOWED_ASSET_CLASSES, "asset_class")
+        )
 
         return RunRequest(
             symbol=normalized_symbol,
-            asset_class=normalize_enum_value(asset_class, ALLOWED_ASSET_CLASSES, "asset_class"),  # type: ignore[arg-type]
+            asset_class=normalized_asset_class,  # type: ignore[arg-type]
             horizon=normalize_enum_value(horizon, ALLOWED_HORIZONS, "horizon"),  # type: ignore[arg-type]
             research_depth=depth,  # type: ignore[arg-type]
             llm_provider=provider,  # type: ignore[arg-type]
@@ -128,6 +134,15 @@ def build_run_request(
         )
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
+
+
+def infer_asset_class(symbol: str) -> str:
+    normalized = symbol.strip().upper()
+    if normalized.endswith("-SWAP"):
+        return AssetClassOption.crypto.value
+    if normalized in {"BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "AVAX", "LINK", "LTC", "BCH"}:
+        return AssetClassOption.crypto.value
+    return AssetClassOption.equity.value
 
 
 def discover_fixtures(fixtures_dir: Path = Path("data/fixtures")) -> list[str]:
