@@ -35,10 +35,28 @@ If your key file is named `notepad.env`, that is also loaded automatically.
 Supported key names:
 
 ```text
+OKX_API_KEY=
+OKX_SECRET_KEY=
+OKX_PASSPHRASE=
+OKX_DEMO=true
+OKX_READ_ONLY=true
+OKX_TRADEKIT_MODULES=market
 TAVILY_API_KEY=
 FMP_API_KEY=
 FINNHUB_API_KEY=
 ```
+
+OKX market data is the preferred crypto market-data source. `ETH` with `asset_class=crypto`
+is resolved to OKX instruments such as `ETH-USDT-SWAP` before K-line retrieval, avoiding
+equity ticker collisions. Private OKX keys are used only for read-only account checks:
+
+```powershell
+uv run ird okx check
+uv run ird okx account
+uv run ird okx account --inst-type SWAP
+```
+
+Keep `OKX_READ_ONLY=true`; this project does not place orders or produce position-sizing instructions.
 
 The baseline model target is Qwen3-8B Instruct/Chat. LoRA integration remains pending until training artifacts are produced; do not report improvement metrics until measured results exist.
 

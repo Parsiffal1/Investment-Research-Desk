@@ -93,7 +93,14 @@ def _fallback_chain(primary: list[str], available: list[str]) -> list[str]:
 
 
 def _vendor_methods(settings: Settings) -> dict[str, dict[str, Callable[[RunRequest], Any]]]:
-    okx = OkxMarketDataProvider(settings.okx_base_url)
+    okx = OkxMarketDataProvider(
+        settings.okx_base_url,
+        api_key=settings.okx_api_key,
+        secret_key=settings.okx_secret_key,
+        passphrase=settings.okx_passphrase,
+        demo=settings.okx_demo,
+        read_only=settings.okx_read_only,
+    )
     fmp = FmpProvider(settings.fmp_api_key, settings.fmp_base_url)
     finnhub = FinnhubProvider(settings.finnhub_api_key, settings.finnhub_base_url)
     tavily = TavilySearchProvider(settings.tavily_api_key, settings.tavily_base_url)
