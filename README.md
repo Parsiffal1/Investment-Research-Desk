@@ -55,13 +55,47 @@ Each report run writes:
 ```text
 runs/{run_id}/
   input.json
+  agent_contracts.json
   normalized_data.json
   analyst_outputs.json
+  analyst_team_outputs.json
+  bull_risk_outputs.json
+  research_debate.json
   final_research_context.json
+  final_market_context_cache.json
   research_brief.md
   trace.json
   metrics.json
 ```
+
+The workflow follows a TradingAgents-style research structure while stopping before any trading or portfolio execution layer:
+
+```text
+Data Ingestion
+  -> Analyst Team
+     -> Fundamental/Macro Analyst
+     -> News/Macro Impact Analyst
+     -> Sentiment Analyst
+     -> Technical Analyst
+  -> Bull/Bear Research Debate
+     -> Bull Researcher
+     -> Bear Researcher
+  -> Research Reporter
+  -> final_market_context_cache
+```
+
+## Agent Contracts
+
+Each workflow node has an explicit contract covering role, allowed inputs, allowed tools, forbidden actions, output schema, and system prompt. Contracts are persisted per run in `agent_contracts.json`.
+
+The MVP enforces tool boundaries by scoping each analyst's input data before execution:
+
+- `Fundamental/Macro Analyst`: fundamental metadata, quote metadata, and macro/news context.
+- `News/Macro Impact Analyst`: news events only.
+- `Sentiment Analyst`: sentiment inputs only.
+- `Technical Analyst`: OHLCV and deterministic indicators only.
+- `Bull/Bear Researchers`: analyst outputs only, no direct external provider calls.
+- `Research Reporter`: analyst/debate outputs and warnings only.
 
 ## Guardrails
 

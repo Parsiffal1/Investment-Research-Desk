@@ -16,19 +16,26 @@ def test_fixture_workflow_creates_artifacts(tmp_path: Path):
     assert context.symbol == "XAU-USDT-SWAP"
     assert context.key_drivers
     run_dir = tmp_path / state["run_id"]
+    assert (run_dir / "agent_contracts.json").exists()
     assert (run_dir / "final_research_context.json").exists()
     assert (run_dir / "research_brief.md").exists()
     assert (run_dir / "trace.json").exists()
     assert (run_dir / "metrics.json").exists()
     assert (run_dir / "checkpoint.json").exists()
+    assert (run_dir / "analyst_team_outputs.json").exists()
+    assert (run_dir / "research_debate.json").exists()
+    assert (run_dir / "final_market_context_cache.json").exists()
     trace_names = [agent["name"] for agent in state["trace"]["agents"]]
     assert "fundamental_macro" in trace_names
     assert "news_impact" in trace_names
     assert "sentiment" in trace_names
     assert "technical" in trace_names
-    assert "constructive_case" in trace_names
-    assert "risk_case" in trace_names
+    assert "analyst_team" in trace_names
+    assert "bull_researcher" in trace_names
+    assert "bear_researcher" in trace_names
+    assert "bull_bear_research_debate" in trace_names
     assert "research_reporter" in trace_names
+    assert "final_market_context_cache" in trace_names
     assert "analyst_layer" not in trace_names
     assert "research_layer" not in trace_names
 
@@ -59,15 +66,24 @@ def test_resume_from_mid_graph_checkpoint_continues_remaining_agents(tmp_path: P
         "news_impact",
         "sentiment",
         "technical",
+        "analyst_team",
     ]
     checkpoint["completed_steps"] = kept_steps
     checkpoint["trace"]["completed_steps"] = kept_steps
     checkpoint["trace"]["agents"] = [agent for agent in checkpoint["trace"]["agents"] if agent["name"] in kept_steps]
-    for key in ["constructive", "risk", "final_context", "metrics", "output_paths"]:
+    for key in ["constructive", "risk", "research_debate", "final_context", "final_market_context_cache", "metrics", "output_paths"]:
         checkpoint.pop(key, None)
     workflow.store.save_checkpoint(first["run_id"], checkpoint)
 
     resumed = workflow.run(request, checkpoint=True, resume_run_id=first["run_id"])
 
-    assert resumed["completed_steps"][-4:] == ["constructive_case", "risk_case", "research_reporter", "persist"]
+    assert resumed["completed_steps"][-6:] == [
+        "bull_researcher",
+        "bear_researcher",
+        "bull_bear_research_debate",
+        "research_reporter",
+        "final_market_context_cache",
+        "persist",
+    ]
     assert (tmp_path / first["run_id"] / "final_research_context.json").exists()
+    assert (tmp_path / first["run_id"] / "final_market_context_cache.json").exists()

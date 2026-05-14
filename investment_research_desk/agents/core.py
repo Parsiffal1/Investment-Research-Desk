@@ -21,6 +21,7 @@ from investment_research_desk.tools.indicators import (
     support_resistance,
     trend_label,
 )
+from investment_research_desk.agents.contracts import get_agent_contract
 
 
 BULLISH_TERMS = {
@@ -94,6 +95,7 @@ class NewsImpactAnalyst:
     name = "news_impact"
 
     def run(self, data: NormalizedData, llm: LLMClient) -> NewsImpactResult:
+        contract = get_agent_contract(self.name)
         dominant = [event.title for event in data.news_events[:5]]
         event_types: dict[str, str] = {}
         bullish = bearish = 0
@@ -110,7 +112,7 @@ class NewsImpactAnalyst:
         if llm.provider != "fake" and dominant:
             try:
                 llm_result = llm.chat_json(
-                    "You are a financial news impact analyst. Return only JSON.",
+                    contract.system_prompt,
                     (
                         "Analyze the market impact for the target asset. "
                         "Return JSON with keys impact_logic and confidence. "
@@ -135,7 +137,6 @@ class SentimentAnalyst:
 
     def run(self, data: NormalizedData, llm: LLMClient) -> SentimentResult:
         texts = [item.text for item in data.sentiment_inputs]
-        texts.extend(f"{event.title} {event.summary or ''}" for event in data.news_events)
         joined = " ".join(texts).lower()
         bullish = sum(1 for term in BULLISH_TERMS if term in joined)
         bearish = sum(1 for term in BEARISH_TERMS if term in joined)

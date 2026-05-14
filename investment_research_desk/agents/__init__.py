@@ -7,8 +7,10 @@ from investment_research_desk.agents.core import (
     TechnicalAnalyst,
     ConstructiveCaseAnalyst,
 )
+from investment_research_desk.agents.contracts import AgentContract, contract_manifest, get_agent_contract
 
 __all__ = [
+    "AgentContract",
     "FundamentalMacroAnalyst",
     "NewsImpactAnalyst",
     "ResearchReporter",
@@ -16,5 +18,6 @@ __all__ = [
     "SentimentAnalyst",
     "TechnicalAnalyst",
     "ConstructiveCaseAnalyst",
+    "contract_manifest",
+    "get_agent_contract",
 ]
-

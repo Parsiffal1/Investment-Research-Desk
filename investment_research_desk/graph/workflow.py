@@ -16,6 +16,8 @@ from investment_research_desk.agents import (
     RiskCaseAnalyst,
     SentimentAnalyst,
     TechnicalAnalyst,
+    contract_manifest,
+    get_agent_contract,
 )
 from investment_research_desk.config import Settings, load_settings
 from investment_research_desk.dataflows import route_to_vendor
@@ -48,9 +50,13 @@ class WorkflowState(TypedDict, total=False):
     news: dict[str, Any]
     sentiment: dict[str, Any]
     technical: dict[str, Any]
+    analyst_team: dict[str, Any]
     constructive: dict[str, Any]
     risk: dict[str, Any]
+    research_debate: dict[str, Any]
     final_context: dict[str, Any]
+    final_market_context_cache: dict[str, Any]
+    agent_contracts: dict[str, Any]
     trace: dict[str, Any]
     metrics: dict[str, Any]
     warnings: list[str]
@@ -82,6 +88,7 @@ class ResearchWorkflow:
             state = {
                 "run_id": run_id,
                 "request": request.model_dump(mode="json"),
+                "agent_contracts": contract_manifest(),
                 "trace": trace.model_dump(mode="json"),
                 "warnings": [],
                 "completed_steps": [],
@@ -89,6 +96,7 @@ class ResearchWorkflow:
             }
             self.store.ensure_run_dir(run_id)
             self.store.write_json(run_id, "input.json", request)
+            self.store.write_json(run_id, "agent_contracts.json", state["agent_contracts"])
         state["checkpoint_enabled"] = checkpoint
         return self.graph.invoke(state)
 
@@ -100,9 +108,12 @@ class ResearchWorkflow:
         graph.add_node("news_impact", self._news_impact)
         graph.add_node("sentiment", self._sentiment)
         graph.add_node("technical", self._technical)
-        graph.add_node("constructive_case", self._constructive_case)
-        graph.add_node("risk_case", self._risk_case)
+        graph.add_node("analyst_team", self._analyst_team)
+        graph.add_node("bull_researcher", self._bull_researcher)
+        graph.add_node("bear_researcher", self._bear_researcher)
+        graph.add_node("bull_bear_research_debate", self._bull_bear_research_debate)
         graph.add_node("research_reporter", self._research_reporter)
+        graph.add_node("final_market_context_cache", self._final_market_context_cache)
         graph.add_node("persist", self._persist)
         graph.add_edge(START, "run_controller")
         graph.add_edge("run_controller", "data_ingestion")
@@ -110,10 +121,13 @@ class ResearchWorkflow:
         graph.add_edge("fundamental_macro", "news_impact")
         graph.add_edge("news_impact", "sentiment")
         graph.add_edge("sentiment", "technical")
-        graph.add_edge("technical", "constructive_case")
-        graph.add_edge("constructive_case", "risk_case")
-        graph.add_edge("risk_case", "research_reporter")
-        graph.add_edge("research_reporter", "persist")
+        graph.add_edge("technical", "analyst_team")
+        graph.add_edge("analyst_team", "bull_researcher")
+        graph.add_edge("bull_researcher", "bear_researcher")
+        graph.add_edge("bear_researcher", "bull_bear_research_debate")
+        graph.add_edge("bull_bear_research_debate", "research_reporter")
+        graph.add_edge("research_reporter", "final_market_context_cache")
+        graph.add_edge("final_market_context_cache", "persist")
         graph.add_edge("persist", END)
         return graph.compile()
 
@@ -165,7 +179,7 @@ class ResearchWorkflow:
     def _fundamental_macro(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
-            data = NormalizedData.model_validate(s["data"])
+            data = self._scope_data(NormalizedData.model_validate(s["data"]), "fundamental_macro")
             llm = self._make_llm(request, s)
             fundamental = FundamentalMacroAnalyst().run(data, llm)
             s["fundamental"] = fundamental.model_dump(mode="json")
@@ -177,7 +191,7 @@ class ResearchWorkflow:
     def _news_impact(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
-            data = NormalizedData.model_validate(s["data"])
+            data = self._scope_data(NormalizedData.model_validate(s["data"]), "news_impact")
             llm = self._make_llm(request, s)
             news = NewsImpactAnalyst().run(data, llm)
             s["news"] = news.model_dump(mode="json")
@@ -189,7 +203,7 @@ class ResearchWorkflow:
     def _sentiment(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
-            data = NormalizedData.model_validate(s["data"])
+            data = self._scope_data(NormalizedData.model_validate(s["data"]), "sentiment")
             llm = self._make_llm(request, s)
             sentiment = SentimentAnalyst().run(data, llm)
             s["sentiment"] = sentiment.model_dump(mode="json")
@@ -201,7 +215,7 @@ class ResearchWorkflow:
     def _technical(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
-            data = NormalizedData.model_validate(s["data"])
+            data = self._scope_data(NormalizedData.model_validate(s["data"]), "technical")
             llm = self._make_llm(request, s)
             technical = TechnicalAnalyst().run(data, llm)
             s["technical"] = technical.model_dump(mode="json")
@@ -210,7 +224,43 @@ class ResearchWorkflow:
 
         return self._run_step(state, "technical", work)
 
-    def _constructive_case(self, state: WorkflowState) -> WorkflowState:
+    def _analyst_team(self, state: WorkflowState) -> WorkflowState:
+        def work(s: WorkflowState) -> WorkflowState:
+            data = NormalizedData.model_validate(s["data"])
+            fundamental = FundamentalMacroResult.model_validate(s["fundamental"])
+            news = NewsImpactResult.model_validate(s["news"])
+            sentiment = SentimentResult.model_validate(s["sentiment"])
+            technical = TechnicalState.model_validate(s["technical"])
+            analyst_team = {
+                "team": "Analyst Team",
+                "contract": get_agent_contract("analyst_team").model_dump(mode="json"),
+                "symbol": data.symbol,
+                "asset_class": data.asset_class,
+                "horizon": data.horizon,
+                "members": {
+                    "fundamentals_analyst": fundamental.model_dump(mode="json"),
+                    "news_analyst": news.model_dump(mode="json"),
+                    "sentiment_analyst": sentiment.model_dump(mode="json"),
+                    "technical_analyst": technical.model_dump(mode="json"),
+                },
+                "synthesis": {
+                    "fundamental_view": fundamental.fundamental_view,
+                    "news_view": news.asset_impact.get(data.symbol, "mixed"),
+                    "sentiment_label": sentiment.sentiment_label,
+                    "technical_view": technical.technical_view,
+                    "research_handoff": (
+                        "Use these analyst outputs as evidence for bull and bear researchers. "
+                        "Do not convert them into order instructions or position sizing."
+                    ),
+                },
+            }
+            s["analyst_team"] = analyst_team
+            self.store.write_json(s["run_id"], "analyst_team_outputs.json", analyst_team)
+            return s
+
+        return self._run_step(state, "analyst_team", work)
+
+    def _bull_researcher(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
             llm = self._make_llm(request, s)
@@ -223,9 +273,9 @@ class ResearchWorkflow:
             self._write_bull_risk_outputs(s)
             return s
 
-        return self._run_step(state, "constructive_case", work)
+        return self._run_step(state, "bull_researcher", work)
 
-    def _risk_case(self, state: WorkflowState) -> WorkflowState:
+    def _bear_researcher(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
             llm = self._make_llm(request, s)
@@ -239,7 +289,45 @@ class ResearchWorkflow:
             self._write_bull_risk_outputs(s)
             return s
 
-        return self._run_step(state, "risk_case", work)
+        return self._run_step(state, "bear_researcher", work)
+
+    def _bull_bear_research_debate(self, state: WorkflowState) -> WorkflowState:
+        def work(s: WorkflowState) -> WorkflowState:
+            constructive = ResearchCase.model_validate(s["constructive"])
+            risk = ResearchCase.model_validate(s["risk"])
+            shared_evidence = sorted(set(constructive.evidence).intersection(risk.evidence))
+            debate = {
+                "team": "Bull/Bear Research Debate",
+                "contract": get_agent_contract("bull_bear_research_debate").model_dump(mode="json"),
+                "bull_researcher": {
+                    "role": "constructive researcher",
+                    "thesis": constructive.thesis,
+                    "evidence": constructive.evidence,
+                    "conditions": constructive.conditions,
+                    "confidence": constructive.confidence,
+                },
+                "bear_researcher": {
+                    "role": "risk researcher",
+                    "thesis": risk.thesis,
+                    "evidence": risk.evidence,
+                    "conditions": risk.conditions,
+                    "confidence": risk.confidence,
+                },
+                "points_of_agreement": shared_evidence,
+                "key_tensions": [
+                    "constructive case requires confirmation from support and macro conditions",
+                    "risk case emphasizes repricing, volatility, and data coverage uncertainty",
+                ],
+                "reporter_handoff": (
+                    "Produce balanced research context only. Avoid buy/sell wording, order language, "
+                    "position sizing, and profitability claims."
+                ),
+            }
+            s["research_debate"] = debate
+            self.store.write_json(s["run_id"], "research_debate.json", debate)
+            return s
+
+        return self._run_step(state, "bull_bear_research_debate", work)
 
     def _research_reporter(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
@@ -272,6 +360,36 @@ class ResearchWorkflow:
 
         return self._run_step(state, "research_reporter", work)
 
+    def _final_market_context_cache(self, state: WorkflowState) -> WorkflowState:
+        def work(s: WorkflowState) -> WorkflowState:
+            final = FinalResearchContext.model_validate(s["final_context"])
+            cache = {
+                "cache_name": "final_market_context_cache",
+                "contract": get_agent_contract("final_market_context_cache").model_dump(mode="json"),
+                "run_id": s["run_id"],
+                "cache_key": f"{final.symbol}:{final.asset_class}:{final.horizon}",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "final_market_context": final.model_dump(mode="json"),
+                "analyst_team_summary": s.get("analyst_team", {}).get("synthesis", {}),
+                "research_debate_summary": {
+                    "bull_thesis": s.get("research_debate", {}).get("bull_researcher", {}).get("thesis"),
+                    "bear_thesis": s.get("research_debate", {}).get("bear_researcher", {}).get("thesis"),
+                    "key_tensions": s.get("research_debate", {}).get("key_tensions", []),
+                },
+                "usage_boundary": {
+                    "purpose": "research context cache for downstream strategy research",
+                    "not_for": ["order execution", "position sizing", "profit guarantee"],
+                },
+            }
+            s["final_market_context_cache"] = cache
+            path = self.store.write_json(s["run_id"], "final_market_context_cache.json", cache)
+            output_paths = dict(s.get("output_paths", {}))
+            output_paths["final_market_context_cache"] = str(path)
+            s["output_paths"] = output_paths
+            return s
+
+        return self._run_step(state, "final_market_context_cache", work)
+
     def _persist(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             final = FinalResearchContext.model_validate(s["final_context"])
@@ -290,12 +408,15 @@ class ResearchWorkflow:
                 compression_ratio=compression_ratio(raw_tokens, final_tokens),
                 guardrail_violations=violations,
             )
-            paths = {
-                "final_research_context": str(self.store.write_json(s["run_id"], "final_research_context.json", final)),
-                "research_brief": str(self.store.write_text(s["run_id"], "research_brief.md", markdown)),
-                "trace": str(self.store.write_json(s["run_id"], "trace.json", trace)),
-                "metrics": str(self.store.write_json(s["run_id"], "metrics.json", metrics)),
-            }
+            paths = dict(s.get("output_paths", {}))
+            paths.update(
+                {
+                    "final_research_context": str(self.store.write_json(s["run_id"], "final_research_context.json", final)),
+                    "research_brief": str(self.store.write_text(s["run_id"], "research_brief.md", markdown)),
+                    "trace": str(self.store.write_json(s["run_id"], "trace.json", trace)),
+                    "metrics": str(self.store.write_json(s["run_id"], "metrics.json", metrics)),
+                }
+            )
             s["trace"] = trace.model_dump(mode="json")
             s["metrics"] = metrics.model_dump(mode="json")
             s["output_paths"] = paths
@@ -307,6 +428,7 @@ class ResearchWorkflow:
         completed = list(state.get("completed_steps", []))
         if step_name in completed:
             return state
+        get_agent_contract(step_name)
         started = time.perf_counter()
         try:
             state = work(state)
@@ -363,6 +485,40 @@ class ResearchWorkflow:
             "bull_risk_outputs.json",
             {key: value for key, value in outputs.items() if value is not None},
         )
+
+    @staticmethod
+    def _scope_data(data: NormalizedData, agent_name: str) -> NormalizedData:
+        if agent_name == "fundamental_macro":
+            metadata_keys = {"fmp_profile", "fmp_quote", "finnhub_quote", "source_status", "provider_mode"}
+            return NormalizedData(
+                symbol=data.symbol,
+                asset_class=data.asset_class,
+                horizon=data.horizon,
+                news_events=data.news_events,
+                source_metadata={key: value for key, value in data.source_metadata.items() if key in metadata_keys},
+            )
+        if agent_name == "news_impact":
+            return NormalizedData(
+                symbol=data.symbol,
+                asset_class=data.asset_class,
+                horizon=data.horizon,
+                news_events=data.news_events,
+            )
+        if agent_name == "sentiment":
+            return NormalizedData(
+                symbol=data.symbol,
+                asset_class=data.asset_class,
+                horizon=data.horizon,
+                sentiment_inputs=data.sentiment_inputs,
+            )
+        if agent_name == "technical":
+            return NormalizedData(
+                symbol=data.symbol,
+                asset_class=data.asset_class,
+                horizon=data.horizon,
+                ohlcv=data.ohlcv,
+            )
+        raise ValueError(f"No data scope registered for agent {agent_name}")
 
     @staticmethod
     def _append_trace(state: WorkflowState, agent_trace: AgentTrace) -> None:
