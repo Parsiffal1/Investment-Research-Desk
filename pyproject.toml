@@ -1,7 +1,7 @@
 [project]
 name = "investment-research-desk"
 version = "0.1.0"
-description = "Investment Research Desk / 投研策略台 CLI MVP"
+description = "Investment Research Desk / 投研策略台 CLI"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

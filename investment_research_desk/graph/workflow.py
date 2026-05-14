@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypedDict
@@ -65,6 +66,12 @@ class WorkflowState(TypedDict, total=False):
     checkpoint_enabled: bool
 
 
+class ParallelAgentError(RuntimeError):
+    def __init__(self, message: str, trace: AgentTrace):
+        super().__init__(message)
+        self.trace = trace
+
+
 class ResearchWorkflow:
     def __init__(self, settings: Settings | None = None, runs_dir: Path | None = None):
         self.settings = settings or load_settings()
@@ -104,10 +111,6 @@ class ResearchWorkflow:
         graph = StateGraph(WorkflowState)
         graph.add_node("run_controller", self._run_controller)
         graph.add_node("data_ingestion", self._data_ingestion)
-        graph.add_node("fundamental_macro", self._fundamental_macro)
-        graph.add_node("news_impact", self._news_impact)
-        graph.add_node("sentiment", self._sentiment)
-        graph.add_node("technical", self._technical)
         graph.add_node("analyst_team", self._analyst_team)
         graph.add_node("bull_researcher", self._bull_researcher)
         graph.add_node("bear_researcher", self._bear_researcher)
@@ -117,11 +120,7 @@ class ResearchWorkflow:
         graph.add_node("persist", self._persist)
         graph.add_edge(START, "run_controller")
         graph.add_edge("run_controller", "data_ingestion")
-        graph.add_edge("data_ingestion", "fundamental_macro")
-        graph.add_edge("fundamental_macro", "news_impact")
-        graph.add_edge("news_impact", "sentiment")
-        graph.add_edge("sentiment", "technical")
-        graph.add_edge("technical", "analyst_team")
+        graph.add_edge("data_ingestion", "analyst_team")
         graph.add_edge("analyst_team", "bull_researcher")
         graph.add_edge("bull_researcher", "bear_researcher")
         graph.add_edge("bear_researcher", "bull_bear_research_debate")
@@ -226,7 +225,18 @@ class ResearchWorkflow:
 
     def _analyst_team(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
+            request = RunRequest.model_validate(s["request"])
             data = NormalizedData.model_validate(s["data"])
+            outputs, traces, warnings = self._run_analysts_parallel(request, data)
+            s["fundamental"] = outputs["fundamental_macro"]
+            s["news"] = outputs["news_impact"]
+            s["sentiment"] = outputs["sentiment"]
+            s["technical"] = outputs["technical"]
+            for agent_trace in traces:
+                self._append_trace(s, agent_trace)
+            if warnings:
+                s["warnings"] = list(s.get("warnings", [])) + warnings
+            self._write_analyst_outputs(s)
             fundamental = FundamentalMacroResult.model_validate(s["fundamental"])
             news = NewsImpactResult.model_validate(s["news"])
             sentiment = SentimentResult.model_validate(s["sentiment"])
@@ -234,6 +244,7 @@ class ResearchWorkflow:
             analyst_team = {
                 "team": "Analyst Team",
                 "contract": get_agent_contract("analyst_team").model_dump(mode="json"),
+                "execution_mode": "parallel_thread_pool",
                 "symbol": data.symbol,
                 "asset_class": data.asset_class,
                 "horizon": data.horizon,
@@ -259,6 +270,58 @@ class ResearchWorkflow:
             return s
 
         return self._run_step(state, "analyst_team", work)
+
+    def _run_analysts_parallel(
+        self, request: RunRequest, data: NormalizedData
+    ) -> tuple[dict[str, dict[str, Any]], list[AgentTrace], list[str]]:
+        jobs = {
+            "fundamental_macro": lambda: FundamentalMacroAnalyst().run(
+                self._scope_data(data, "fundamental_macro"),
+                self._make_llm_for_request(request),
+            ),
+            "news_impact": lambda: NewsImpactAnalyst().run(
+                self._scope_data(data, "news_impact"),
+                self._make_llm_for_request(request),
+            ),
+            "sentiment": lambda: SentimentAnalyst().run(
+                self._scope_data(data, "sentiment"),
+                self._make_llm_for_request(request),
+            ),
+            "technical": lambda: TechnicalAnalyst().run(
+                self._scope_data(data, "technical"),
+                self._make_llm_for_request(request),
+            ),
+        }
+        outputs: dict[str, dict[str, Any]] = {}
+        traces: list[AgentTrace] = []
+        warnings: list[str] = []
+        with ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="ird-analyst") as executor:
+            futures = {executor.submit(self._run_parallel_agent, name, call): name for name, call in jobs.items()}
+            for future in as_completed(futures):
+                name = futures[future]
+                try:
+                    output, trace = future.result()
+                    outputs[name] = output
+                    traces.append(trace)
+                except ParallelAgentError as exc:
+                    warnings.append(f"{name} failed in parallel analyst layer: {exc}")
+                    traces.append(exc.trace)
+                    raise
+        order = ["fundamental_macro", "news_impact", "sentiment", "technical"]
+        traces.sort(key=lambda trace: order.index(trace.name) if trace.name in order else len(order))
+        return outputs, traces, warnings
+
+    @staticmethod
+    def _run_parallel_agent(name: str, call) -> tuple[dict[str, Any], AgentTrace]:
+        get_agent_contract(name)
+        started = time.perf_counter()
+        try:
+            result = call()
+            trace = AgentTrace(name=name, status="success", latency_sec=round(time.perf_counter() - started, 4))
+            return result.model_dump(mode="json"), trace
+        except Exception as exc:
+            trace = AgentTrace(name=name, status="failed", latency_sec=round(time.perf_counter() - started, 4), warnings=[str(exc)])
+            raise ParallelAgentError(f"{name} failed: {exc}", trace) from exc
 
     def _bull_researcher(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
@@ -450,17 +513,20 @@ class ResearchWorkflow:
         return state
 
     def _make_llm(self, request: RunRequest, state: WorkflowState):
-        llm = make_llm_client(
-            self.settings,
-            request.llm_provider,
-            request.model,
-            allow_fake_fallback=bool(request.fixture),
-        )
+        llm = self._make_llm_for_request(request)
         if llm.provider == "fake" and request.llm_provider == "auto":
             warning = "Ollama unavailable; fixture run used deterministic fake LLM fallback."
             if warning not in state.get("warnings", []):
                 state["warnings"] = list(state.get("warnings", [])) + [warning]
         return llm
+
+    def _make_llm_for_request(self, request: RunRequest):
+        return make_llm_client(
+            self.settings,
+            request.llm_provider,
+            request.model,
+            allow_fake_fallback=bool(request.fixture),
+        )
 
     def _write_analyst_outputs(self, state: WorkflowState) -> None:
         outputs = {

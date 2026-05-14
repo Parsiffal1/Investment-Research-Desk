@@ -38,6 +38,7 @@ def test_fixture_workflow_creates_artifacts(tmp_path: Path):
     assert "final_market_context_cache" in trace_names
     assert "analyst_layer" not in trace_names
     assert "research_layer" not in trace_names
+    assert state["analyst_team"]["execution_mode"] == "parallel_thread_pool"
 
 
 def test_resume_from_checkpoint_completes(tmp_path: Path):
@@ -62,15 +63,12 @@ def test_resume_from_mid_graph_checkpoint_continues_remaining_agents(tmp_path: P
     kept_steps = [
         "run_controller",
         "data_ingestion",
-        "fundamental_macro",
-        "news_impact",
-        "sentiment",
-        "technical",
         "analyst_team",
     ]
+    kept_trace_names = set(kept_steps + ["fundamental_macro", "news_impact", "sentiment", "technical"])
     checkpoint["completed_steps"] = kept_steps
     checkpoint["trace"]["completed_steps"] = kept_steps
-    checkpoint["trace"]["agents"] = [agent for agent in checkpoint["trace"]["agents"] if agent["name"] in kept_steps]
+    checkpoint["trace"]["agents"] = [agent for agent in checkpoint["trace"]["agents"] if agent["name"] in kept_trace_names]
     for key in ["constructive", "risk", "research_debate", "final_context", "final_market_context_cache", "metrics", "output_paths"]:
         checkpoint.pop(key, None)
     workflow.store.save_checkpoint(first["run_id"], checkpoint)
