@@ -1,5 +1,6 @@
 .env
 notepad.env
+.codex_refs/
 .venv/
 .pytest_cache/
 __pycache__/

@@ -30,6 +30,45 @@ def test_cli_report_fixture(tmp_path):
     assert result.exit_code == 0
     assert "Research Context" in result.output
     assert list(tmp_path.glob("*/final_research_context.json"))
+    assert list(tmp_path.glob("*/final_market_context_cache.json"))
+
+
+def test_cli_report_rejects_missing_symbol_for_live_run(tmp_path):
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            "--llm-provider",
+            "fake",
+            "--runs-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "--symbol is required" in result.output
+
+
+def test_cli_runs_lists_checkpoint(tmp_path):
+    report_result = runner.invoke(
+        app,
+        [
+            "report",
+            "--fixture",
+            "gold_cpi",
+            "--llm-provider",
+            "fake",
+            "--checkpoint",
+            "--runs-dir",
+            str(tmp_path),
+        ],
+    )
+    assert report_result.exit_code == 0
+
+    runs_result = runner.invoke(app, ["runs", "--runs-dir", str(tmp_path), "--resumable-only"])
+
+    assert runs_result.exit_code == 0
+    assert "ird report --resume" in runs_result.output
 
 
 def test_cli_eval_guardrail(tmp_path, monkeypatch):
@@ -38,4 +77,3 @@ def test_cli_eval_guardrail(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "guardrail" in result.output
-

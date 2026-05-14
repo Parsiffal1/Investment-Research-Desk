@@ -47,8 +47,39 @@ The baseline model target is Qwen3-8B Instruct/Chat. LoRA integration remains pe
 - `ird` starts an interactive research flow.
 - `ird report` generates one research context.
 - `ird batch` runs multiple symbols.
+- `ird runs` lists completed, partial, and resumable run directories.
 - `ird eval` runs evaluation suites.
 - `ird config check` validates runtime configuration.
+
+### CLI Interaction Contract
+
+`ird` without subcommands opens a menu-driven flow modeled after TradingAgents' CLI experience:
+
+```text
+New research report
+  -> choose fixture or live providers
+  -> choose symbol, asset class, horizon, research depth, LLM provider, model
+  -> review the run contract
+  -> run Analyst Team -> Bull/Bear Research Debate -> Research Reporter
+
+Resume from checkpoint
+  -> choose an existing run_id with checkpoint.json
+  -> continue from the latest completed graph step
+
+List runs / Config check / Clear unfinished checkpoints
+  -> operational CLI actions with explicit status output
+```
+
+Validated option domains:
+
+```text
+asset_class: crypto, precious_metal, equity_index, commodity, fx, equity, other
+horizon: intraday, short_term, swing, medium_term
+research_depth: quick, standard, deep
+llm_provider: auto, fake, ollama
+```
+
+Errors are reported as `CLI Contract Error` panels with actionable hints. Live Ollama runs preflight `http://localhost:11434/v1/models` before the workflow starts; fixture + `auto` can fall back to the deterministic fake LLM for stable local demos.
 
 Each report run writes:
 
