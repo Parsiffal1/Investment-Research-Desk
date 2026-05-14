@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-AgentTeam = Literal["controller", "data", "analyst", "research", "reporting", "cache"]
+AgentTeam = Literal["controller", "analyst", "research", "reporting", "cache"]
 
 
 class AgentContract(BaseModel):
@@ -39,23 +39,7 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
         output_schema="WorkflowState",
         system_prompt=(
             "You are the run controller for Investment Research Desk. Initialize state, preserve user request "
-            "metadata, and never produce market recommendations."
-        ),
-    ),
-    "data_ingestion": AgentContract(
-        name="data_ingestion",
-        team="data",
-        role="Prepare fixture-backed data or live-run data context before analyst agents call their own tools.",
-        allowed_inputs=["RunRequest", "provider settings", "fixture data"],
-        allowed_tools=[
-            "FixtureProvider",
-            "NormalizedData shell builder",
-        ],
-        forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
-        output_schema="NormalizedData",
-        system_prompt=(
-            "You are the data ingestion node. Use only configured providers and fixtures, normalize evidence, "
-            "and record provider warnings without leaking API keys."
+            "metadata, prepare fixture data or live-run seed context, and never produce market recommendations."
         ),
     ),
     "fundamental_macro": AgentContract(

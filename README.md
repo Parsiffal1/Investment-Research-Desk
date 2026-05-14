@@ -114,7 +114,7 @@ runs/{run_id}/
 The workflow follows a TradingAgents-style research structure while stopping before any trading or portfolio execution layer:
 
 ```text
-Data Ingestion
+Run Controller
   -> Analyst Team
      -> Fundamental/Macro Analyst
      -> News/Macro Impact Analyst
@@ -133,7 +133,7 @@ Each workflow node has an explicit contract covering role, allowed inputs, allow
 
 The seven analysis/research/reporting agents call the configured LLM through their contracts. Deterministic Python code first prepares factual candidate outputs, then the LLM reads the evidence and returns schema-validated JSON. If JSON generation or schema validation fails, the workflow falls back to the deterministic candidate and records warnings where applicable.
 
-The workflow enforces tool boundaries by having each analyst call only its allowed dataflow tools. `Data Ingestion` prepares fixture data or a live-run data shell; in live mode, the analyst workers fetch their own inputs and the workflow later merges the resulting normalized data into `normalized_data.json`:
+The workflow enforces tool boundaries by having each analyst call only its allowed dataflow tools. `Run Controller` prepares fixture data or a live-run seed context; in live mode, the analyst workers fetch their own inputs and the workflow later merges the resulting normalized data into `normalized_data.json`:
 
 - `Fundamental/Macro Analyst`: calls `get_fundamentals` and macro/news tools, then reads fundamental metadata, quote metadata, and macro/news context.
 - `News/Macro Impact Analyst`: first asks the LLM to generate an optimized query plan before any tool call is executed. The plan decides whether to call `get_news`, whether to call `get_global_news`, exact query wording, call count, and stop condition within a bounded budget. `get_news` routes through Jin10, Finnhub, Yahoo Finance, and Tavily fallback. If the model tries to finish without any direct instrument-specific `get_news` call, the workflow enforces one targeted search and asks the LLM to evaluate those candidates before final output. If the LLM output must fall back to deterministic recovery, candidate events are filtered by instrument relevance before entering admitted news impact.

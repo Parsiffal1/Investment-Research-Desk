@@ -38,6 +38,7 @@ def test_fixture_workflow_creates_artifacts(tmp_path: Path):
     assert "bull_bear_research_debate" in trace_names
     assert "research_reporter" in trace_names
     assert "final_market_context_cache" in trace_names
+    assert "data_ingestion" not in trace_names
     assert "analyst_layer" not in trace_names
     assert "research_layer" not in trace_names
     assert state["analyst_team"]["execution_mode"] == "parallel_thread_pool"
@@ -64,7 +65,6 @@ def test_resume_from_mid_graph_checkpoint_continues_remaining_agents(tmp_path: P
     checkpoint = workflow.store.load_checkpoint(first["run_id"])
     kept_steps = [
         "run_controller",
-        "data_ingestion",
         "analyst_team",
     ]
     kept_trace_names = set(kept_steps + ["fundamental_macro", "news_impact", "sentiment", "technical"])

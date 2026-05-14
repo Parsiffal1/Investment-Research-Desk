@@ -61,7 +61,7 @@ REQUIRED_ARTIFACTS = (
 )
 
 TEAM_FLOW = (
-    ("Run Control", ("run_controller", "data_ingestion")),
+    ("Run Control", ("run_controller",)),
     (
         "Analyst Team",
         ("fundamental_macro", "news_impact", "sentiment", "technical"),
@@ -152,4 +152,3 @@ def discover_runs(runs_dir: Path) -> list[dict[str, str]]:
             }
         )
     return rows
-

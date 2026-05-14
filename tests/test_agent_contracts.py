@@ -5,7 +5,6 @@ from investment_research_desk.providers.fixtures import FixtureProvider
 
 EXPECTED_CONTRACTS = {
     "run_controller",
-    "data_ingestion",
     "fundamental_macro",
     "news_impact",
     "sentiment",
@@ -53,4 +52,3 @@ def test_agent_data_scopes_do_not_expose_unrelated_inputs():
     assert news.news_events
     assert news.ohlcv == []
     assert news.sentiment_inputs == []
-

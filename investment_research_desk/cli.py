@@ -78,7 +78,7 @@ ASCII_LOGO = r"""
 """
 
 AGENT_TEAMS = {
-    "Run Control": ["run_controller", "data_ingestion"],
+    "Run Control": ["run_controller"],
     "Analyst Team": ["fundamental_macro", "news_impact", "sentiment", "technical"],
     "Bull/Bear Research Debate": ["bull_researcher", "bear_researcher", "bull_bear_research_debate"],
     "Research Reporter": ["research_reporter", "final_market_context_cache", "persist"],
@@ -86,7 +86,6 @@ AGENT_TEAMS = {
 
 AGENT_LABELS = {
     "run_controller": "Run Controller",
-    "data_ingestion": "Data Ingestion",
     "fundamental_macro": "Fundamental / Macro Analyst",
     "news_impact": "News / Macro Impact Analyst",
     "sentiment": "Sentiment Analyst",

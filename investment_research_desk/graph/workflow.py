@@ -117,7 +117,6 @@ class ResearchWorkflow:
     def _build_graph(self):
         graph = StateGraph(WorkflowState)
         graph.add_node("run_controller", self._run_controller)
-        graph.add_node("data_ingestion", self._data_ingestion)
         graph.add_node("analyst_team", self._analyst_team)
         graph.add_node("bull_researcher", self._bull_researcher)
         graph.add_node("bear_researcher", self._bear_researcher)
@@ -126,8 +125,7 @@ class ResearchWorkflow:
         graph.add_node("final_market_context_cache", self._final_market_context_cache)
         graph.add_node("persist", self._persist)
         graph.add_edge(START, "run_controller")
-        graph.add_edge("run_controller", "data_ingestion")
-        graph.add_edge("data_ingestion", "analyst_team")
+        graph.add_edge("run_controller", "analyst_team")
         graph.add_edge("analyst_team", "bull_researcher")
         graph.add_edge("bull_researcher", "bear_researcher")
         graph.add_edge("bear_researcher", "bull_bear_research_debate")
@@ -138,9 +136,6 @@ class ResearchWorkflow:
         return graph.compile()
 
     def _run_controller(self, state: WorkflowState) -> WorkflowState:
-        return self._run_step(state, "run_controller", lambda s: s)
-
-    def _data_ingestion(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
             if request.fixture:
@@ -161,7 +156,7 @@ class ResearchWorkflow:
             self.store.write_json(s["run_id"], "normalized_data.json", data)
             return s
 
-        return self._run_step(state, "data_ingestion", work)
+        return self._run_step(state, "run_controller", work)
 
     def _fundamental_macro(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
