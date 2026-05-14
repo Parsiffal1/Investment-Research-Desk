@@ -90,12 +90,12 @@ Each workflow node has an explicit contract covering role, allowed inputs, allow
 
 The seven analysis/research/reporting agents call the configured LLM through their contracts. Deterministic Python code first prepares factual candidate outputs, then the LLM reads the evidence and returns schema-validated JSON. If JSON generation or schema validation fails, the workflow falls back to the deterministic candidate and records warnings where applicable.
 
-The workflow enforces tool boundaries by scoping each analyst's input data before execution:
+The workflow enforces tool boundaries by having each analyst call only its allowed dataflow tools. `Data Ingestion` prepares fixture data or a live-run data shell; in live mode, the analyst workers fetch their own inputs and the workflow later merges the resulting normalized data into `normalized_data.json`:
 
-- `Fundamental/Macro Analyst`: fundamental metadata, quote metadata, and macro/news context.
-- `News/Macro Impact Analyst`: news events only.
-- `Sentiment Analyst`: sentiment inputs only.
-- `Technical Analyst`: OHLCV and deterministic indicator results only; indicators are calculated by Python, then read by the LLM.
+- `Fundamental/Macro Analyst`: calls `get_fundamentals` and macro/news tools, then reads fundamental metadata, quote metadata, and macro/news context.
+- `News/Macro Impact Analyst`: calls `get_news`, then reads news events only.
+- `Sentiment Analyst`: calls `get_sentiment_inputs`, then reads sentiment inputs only.
+- `Technical Analyst`: calls `get_market_data`, calculates deterministic indicators in Python, then the LLM reads OHLCV and indicator results.
 - `Bull/Bear Researchers`: analyst outputs only, no direct external provider calls.
 - `Research Reporter`: analyst/debate outputs and warnings only.
 

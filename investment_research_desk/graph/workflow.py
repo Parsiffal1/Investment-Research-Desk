@@ -29,6 +29,7 @@ from investment_research_desk.schemas import (
     AgentTrace,
     FinalResearchContext,
     FundamentalMacroResult,
+    NewsEvent,
     NewsImpactResult,
     NormalizedData,
     ResearchCase,
@@ -136,40 +137,21 @@ class ResearchWorkflow:
     def _data_ingestion(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
-            warnings = list(s.get("warnings", []))
             if request.fixture:
                 data = self.fixture_provider.load(request.fixture)
                 data.source_metadata["provider_mode"] = "fixture"
             else:
-                market_result = route_to_vendor("get_market_data", self.settings, request)
-                news_result = route_to_vendor("get_news", self.settings, request)
-                sentiment_result = route_to_vendor("get_sentiment_inputs", self.settings, request)
-                fundamentals_result = route_to_vendor("get_fundamentals", self.settings, request)
-                warnings.extend(market_result.warnings)
-                warnings.extend(news_result.warnings)
-                warnings.extend(sentiment_result.warnings)
-                warnings.extend(fundamentals_result.warnings)
-                fundamentals = fundamentals_result.data if isinstance(fundamentals_result.data, dict) else {}
                 data = NormalizedData(
                     symbol=request.symbol,
                     asset_class=request.asset_class,
                     horizon=request.horizon,
-                    ohlcv=market_result.data,
-                    news_events=news_result.data,
-                    sentiment_inputs=sentiment_result.data,
                     source_metadata={
                         "provider_mode": "live",
-                        "source_status": {
-                            "market_data": market_result.status,
-                            "news_data": news_result.status,
-                            "sentiment_data": sentiment_result.status,
-                            "fundamental_data": fundamentals_result.status,
-                        },
-                        **fundamentals,
+                        "tool_call_policy": "analyst_agents_call_allowed_tools",
+                        "agent_tool_status": {},
                     },
                 )
             s["data"] = data.model_dump(mode="json")
-            s["warnings"] = warnings
             self.store.write_json(s["run_id"], "normalized_data.json", data)
             return s
 
@@ -226,12 +208,22 @@ class ResearchWorkflow:
     def _analyst_team(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
             request = RunRequest.model_validate(s["request"])
-            data = NormalizedData.model_validate(s["data"])
-            outputs, traces, warnings = self._run_analysts_parallel(request, data)
+            seed_data = NormalizedData.model_validate(s["data"])
+            outputs, data_slices, traces, warnings = self._run_analysts_parallel(request, seed_data)
             s["fundamental"] = outputs["fundamental_macro"]
             s["news"] = outputs["news_impact"]
             s["sentiment"] = outputs["sentiment"]
             s["technical"] = outputs["technical"]
+            data = self._merge_agent_data(request, seed_data, data_slices)
+            s["data"] = data.model_dump(mode="json")
+            self.store.write_json(s["run_id"], "normalized_data.json", data)
+            tool_warnings = [
+                f"{agent_name}: {warning}"
+                for agent_name, agent_warnings in data.source_metadata.get("agent_tool_warnings", {}).items()
+                for warning in agent_warnings
+            ]
+            if tool_warnings:
+                s["warnings"] = list(s.get("warnings", [])) + tool_warnings
             for agent_trace in traces:
                 self._append_trace(s, agent_trace)
             if warnings:
@@ -273,26 +265,15 @@ class ResearchWorkflow:
 
     def _run_analysts_parallel(
         self, request: RunRequest, data: NormalizedData
-    ) -> tuple[dict[str, dict[str, Any]], list[AgentTrace], list[str]]:
+    ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], list[AgentTrace], list[str]]:
         jobs = {
-            "fundamental_macro": lambda: FundamentalMacroAnalyst().run(
-                self._scope_data(data, "fundamental_macro"),
-                self._make_llm_for_request(request),
-            ),
-            "news_impact": lambda: NewsImpactAnalyst().run(
-                self._scope_data(data, "news_impact"),
-                self._make_llm_for_request(request),
-            ),
-            "sentiment": lambda: SentimentAnalyst().run(
-                self._scope_data(data, "sentiment"),
-                self._make_llm_for_request(request),
-            ),
-            "technical": lambda: TechnicalAnalyst().run(
-                self._scope_data(data, "technical"),
-                self._make_llm_for_request(request),
-            ),
+            "fundamental_macro": lambda: self._run_fundamental_agent(request, data),
+            "news_impact": lambda: self._run_news_agent(request, data),
+            "sentiment": lambda: self._run_sentiment_agent(request, data),
+            "technical": lambda: self._run_technical_agent(request, data),
         }
         outputs: dict[str, dict[str, Any]] = {}
+        data_slices: dict[str, dict[str, Any]] = {}
         traces: list[AgentTrace] = []
         warnings: list[str] = []
         with ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="ird-analyst") as executor:
@@ -300,8 +281,9 @@ class ResearchWorkflow:
             for future in as_completed(futures):
                 name = futures[future]
                 try:
-                    output, trace = future.result()
+                    output, data_slice, trace = future.result()
                     outputs[name] = output
+                    data_slices[name] = data_slice
                     traces.append(trace)
                 except ParallelAgentError as exc:
                     warnings.append(f"{name} failed in parallel analyst layer: {exc}")
@@ -309,19 +291,111 @@ class ResearchWorkflow:
                     raise
         order = ["fundamental_macro", "news_impact", "sentiment", "technical"]
         traces.sort(key=lambda trace: order.index(trace.name) if trace.name in order else len(order))
-        return outputs, traces, warnings
+        return outputs, data_slices, traces, warnings
 
     @staticmethod
-    def _run_parallel_agent(name: str, call) -> tuple[dict[str, Any], AgentTrace]:
+    def _run_parallel_agent(name: str, call) -> tuple[dict[str, Any], dict[str, Any], AgentTrace]:
         get_agent_contract(name)
         started = time.perf_counter()
         try:
-            result = call()
+            result, data = call()
             trace = AgentTrace(name=name, status="success", latency_sec=round(time.perf_counter() - started, 4))
-            return result.model_dump(mode="json"), trace
+            return result.model_dump(mode="json"), data.model_dump(mode="json"), trace
         except Exception as exc:
             trace = AgentTrace(name=name, status="failed", latency_sec=round(time.perf_counter() - started, 4), warnings=[str(exc)])
             raise ParallelAgentError(f"{name} failed: {exc}", trace) from exc
+
+    def _run_fundamental_agent(self, request: RunRequest, seed_data: NormalizedData):
+        data = self._agent_data("fundamental_macro", request, seed_data)
+        result = FundamentalMacroAnalyst().run(data, self._make_llm_for_request(request))
+        return result, data
+
+    def _run_news_agent(self, request: RunRequest, seed_data: NormalizedData):
+        data = self._agent_data("news_impact", request, seed_data)
+        result = NewsImpactAnalyst().run(data, self._make_llm_for_request(request))
+        return result, data
+
+    def _run_sentiment_agent(self, request: RunRequest, seed_data: NormalizedData):
+        data = self._agent_data("sentiment", request, seed_data)
+        result = SentimentAnalyst().run(data, self._make_llm_for_request(request))
+        return result, data
+
+    def _run_technical_agent(self, request: RunRequest, seed_data: NormalizedData):
+        data = self._agent_data("technical", request, seed_data)
+        result = TechnicalAnalyst().run(data, self._make_llm_for_request(request))
+        return result, data
+
+    def _agent_data(self, agent_name: str, request: RunRequest, seed_data: NormalizedData) -> NormalizedData:
+        if request.fixture:
+            data = self._scope_data(seed_data, agent_name)
+            data.source_metadata["tool_call_policy"] = "fixture_data_scoped_to_agent_contract"
+            data.source_metadata["agent_tool_status"] = {agent_name: {"fixture": "success"}}
+            return data
+        if agent_name == "technical":
+            market_result = route_to_vendor("get_market_data", self.settings, request)
+            return NormalizedData(
+                symbol=request.symbol,
+                asset_class=request.asset_class,
+                horizon=request.horizon,
+                ohlcv=market_result.data,
+                source_metadata={
+                    "provider_mode": "live",
+                    "tool_call_policy": "agent_called_allowed_tools",
+                    "agent_tool_status": {agent_name: {"get_market_data": market_result.status}},
+                    "warnings": market_result.warnings,
+                },
+            )
+        if agent_name == "news_impact":
+            news_result = route_to_vendor("get_news", self.settings, request)
+            return NormalizedData(
+                symbol=request.symbol,
+                asset_class=request.asset_class,
+                horizon=request.horizon,
+                news_events=news_result.data,
+                source_metadata={
+                    "provider_mode": "live",
+                    "tool_call_policy": "agent_called_allowed_tools",
+                    "agent_tool_status": {agent_name: {"get_news": news_result.status}},
+                    "warnings": news_result.warnings,
+                },
+            )
+        if agent_name == "sentiment":
+            sentiment_result = route_to_vendor("get_sentiment_inputs", self.settings, request)
+            return NormalizedData(
+                symbol=request.symbol,
+                asset_class=request.asset_class,
+                horizon=request.horizon,
+                sentiment_inputs=sentiment_result.data,
+                source_metadata={
+                    "provider_mode": "live",
+                    "tool_call_policy": "agent_called_allowed_tools",
+                    "agent_tool_status": {agent_name: {"get_sentiment_inputs": sentiment_result.status}},
+                    "warnings": sentiment_result.warnings,
+                },
+            )
+        if agent_name == "fundamental_macro":
+            fundamentals_result = route_to_vendor("get_fundamentals", self.settings, request)
+            news_result = route_to_vendor("get_news", self.settings, request)
+            fundamentals = fundamentals_result.data if isinstance(fundamentals_result.data, dict) else {}
+            return NormalizedData(
+                symbol=request.symbol,
+                asset_class=request.asset_class,
+                horizon=request.horizon,
+                news_events=news_result.data,
+                source_metadata={
+                    "provider_mode": "live",
+                    "tool_call_policy": "agent_called_allowed_tools",
+                    "agent_tool_status": {
+                        agent_name: {
+                            "get_fundamentals": fundamentals_result.status,
+                            "get_news": news_result.status,
+                        }
+                    },
+                    "warnings": fundamentals_result.warnings + news_result.warnings,
+                    **fundamentals,
+                },
+            )
+        raise ValueError(f"No agent data tool plan registered for {agent_name}")
 
     def _bull_researcher(self, state: WorkflowState) -> WorkflowState:
         def work(s: WorkflowState) -> WorkflowState:
@@ -553,6 +627,46 @@ class ResearchWorkflow:
         )
 
     @staticmethod
+    def _merge_agent_data(
+        request: RunRequest, seed_data: NormalizedData, data_slices: dict[str, dict[str, Any]]
+    ) -> NormalizedData:
+        slices = {name: NormalizedData.model_validate(value) for name, value in data_slices.items()}
+        news_events = _dedupe_news_events(
+            [
+                event
+                for name in ("fundamental_macro", "news_impact")
+                for event in slices.get(name, NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon)).news_events
+            ]
+        )
+        sentiment_inputs = slices.get(
+            "sentiment", NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon)
+        ).sentiment_inputs
+        ohlcv = slices.get("technical", NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon)).ohlcv
+        source_metadata: dict[str, Any] = {
+            "provider_mode": seed_data.source_metadata.get("provider_mode", "live"),
+            "tool_call_policy": "analyst_agents_called_allowed_tools",
+            "agent_tool_status": {},
+            "agent_tool_warnings": {},
+        }
+        for name, data in slices.items():
+            source_metadata["agent_tool_status"].update(data.source_metadata.get("agent_tool_status", {}))
+            warnings = data.source_metadata.get("warnings") or []
+            if warnings:
+                source_metadata["agent_tool_warnings"][name] = warnings
+            for key, value in data.source_metadata.items():
+                if key not in {"provider_mode", "tool_call_policy", "agent_tool_status", "warnings"}:
+                    source_metadata[key] = value
+        return NormalizedData(
+            symbol=request.symbol,
+            asset_class=request.asset_class,
+            horizon=request.horizon,
+            ohlcv=ohlcv,
+            news_events=news_events,
+            sentiment_inputs=sentiment_inputs,
+            source_metadata=source_metadata,
+        )
+
+    @staticmethod
     def _scope_data(data: NormalizedData, agent_name: str) -> NormalizedData:
         if agent_name == "fundamental_macro":
             metadata_keys = {"fmp_profile", "fmp_quote", "finnhub_quote", "source_status", "provider_mode"}
@@ -631,3 +745,14 @@ def render_markdown_brief(final: FinalResearchContext) -> str:
         f"## Key Drivers\n\n{drivers}\n\n"
         f"## Key Risks\n\n{risks}\n"
     )
+
+
+def _dedupe_news_events(events: list[NewsEvent]) -> list[NewsEvent]:
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[NewsEvent] = []
+    for event in events:
+        key = (event.title.strip().lower(), event.source.strip().lower(), event.published_at.isoformat())
+        if key not in seen:
+            deduped.append(event)
+            seen.add(key)
+    return deduped

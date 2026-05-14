@@ -1,8 +1,10 @@
 from pathlib import Path
+from datetime import datetime, timezone
 
 from investment_research_desk.config import load_settings
+from investment_research_desk.dataflows.interface import VendorRouteResult
 from investment_research_desk.graph import ResearchWorkflow
-from investment_research_desk.schemas import FinalResearchContext, RunRequest
+from investment_research_desk.schemas import FinalResearchContext, NewsEvent, OHLCVBar, RunRequest, SentimentInput
 
 
 def test_fixture_workflow_creates_artifacts(tmp_path: Path):
@@ -85,3 +87,56 @@ def test_resume_from_mid_graph_checkpoint_continues_remaining_agents(tmp_path: P
     ]
     assert (tmp_path / first["run_id"] / "final_research_context.json").exists()
     assert (tmp_path / first["run_id"] / "final_market_context_cache.json").exists()
+
+
+def test_live_analysts_call_their_own_dataflow_tools(tmp_path: Path, monkeypatch):
+    calls: list[str] = []
+    now = datetime.now(timezone.utc)
+
+    def fake_route_to_vendor(method, settings, request):
+        calls.append(method)
+        if method == "get_market_data":
+            bars = [
+                OHLCVBar(timestamp=now, open=100 + i, high=102 + i, low=99 + i, close=101 + i, volume=1000 + i)
+                for i in range(30)
+            ]
+            return VendorRouteResult(data=bars, status={"fake_market": "success"})
+        if method == "get_news":
+            return VendorRouteResult(
+                data=[
+                    NewsEvent(
+                        title="Macro event supports test asset",
+                        summary="Fixture-like live news",
+                        source="fake_news",
+                        published_at=now,
+                    )
+                ],
+                status={"fake_news": "success"},
+            )
+        if method == "get_sentiment_inputs":
+            return VendorRouteResult(
+                data=[SentimentInput(text="Market discussion is mixed but constructive", source="fake_social", timestamp=now)],
+                status={"fake_social": "success"},
+            )
+        if method == "get_fundamentals":
+            return VendorRouteResult(
+                data={"fmp_quote": {"changePercentage": 1.2}, "fmp_profile": {"companyName": "Fake Asset"}},
+                status={"fake_fundamentals": "success"},
+            )
+        raise AssertionError(f"unexpected method {method}")
+
+    monkeypatch.setattr("investment_research_desk.graph.workflow.route_to_vendor", fake_route_to_vendor)
+    workflow = ResearchWorkflow(settings=load_settings(), runs_dir=tmp_path)
+    request = RunRequest(symbol="FAKE", asset_class="equity", horizon="short_term", llm_provider="fake")
+
+    state = workflow.run(request, checkpoint=True)
+
+    assert "get_market_data" in calls
+    assert "get_sentiment_inputs" in calls
+    assert "get_fundamentals" in calls
+    assert calls.count("get_news") == 2
+    assert state["data"]["source_metadata"]["tool_call_policy"] == "analyst_agents_called_allowed_tools"
+    assert state["data"]["source_metadata"]["agent_tool_status"]["technical"]["get_market_data"] == {"fake_market": "success"}
+    assert state["data"]["source_metadata"]["agent_tool_status"]["fundamental_macro"]["get_fundamentals"] == {
+        "fake_fundamentals": "success"
+    }
