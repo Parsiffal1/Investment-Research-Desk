@@ -52,6 +52,31 @@ class FinnhubProvider:
             )
         return events
 
+    def fetch_global_news(self, request: RunRequest) -> list[NewsEvent]:
+        if not self.api_key:
+            return []
+        data = self._get("news", {"category": "general"})
+        if not isinstance(data, list):
+            return []
+        events: list[NewsEvent] = []
+        for item in data[:10]:
+            headline = item.get("headline")
+            if not headline:
+                continue
+            published_at = datetime.fromtimestamp(int(item.get("datetime", 0)), tz=timezone.utc)
+            events.append(
+                NewsEvent(
+                    title=headline,
+                    summary=item.get("summary"),
+                    source=f"finnhub:{item.get('source') or 'news'}",
+                    published_at=published_at,
+                    url=item.get("url"),
+                    event_type=item.get("category") or "global_market_news",
+                    related_assets=[request.symbol],
+                )
+            )
+        return events
+
     def _get(self, endpoint: str, params: dict) -> object:
         merged = {**params, "token": self.api_key}
         with httpx.Client(timeout=self.timeout) as client:

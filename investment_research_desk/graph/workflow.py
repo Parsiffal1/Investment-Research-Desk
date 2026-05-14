@@ -311,8 +311,15 @@ class ResearchWorkflow:
         return result, data
 
     def _run_news_agent(self, request: RunRequest, seed_data: NormalizedData):
-        data = self._agent_data("news_impact", request, seed_data)
-        result = NewsImpactAnalyst().run(data, self._make_llm_for_request(request))
+        if request.fixture:
+            data = self._agent_data("news_impact", request, seed_data)
+            result = NewsImpactAnalyst().run(data, self._make_llm_for_request(request))
+            return result, data
+        result, data = NewsImpactAnalyst().run_with_tools(
+            request,
+            self._make_llm_for_request(request),
+            lambda method, tool_request: route_to_vendor(method, self.settings, tool_request),
+        )
         return result, data
 
     def _run_sentiment_agent(self, request: RunRequest, seed_data: NormalizedData):

@@ -1,4 +1,5 @@
-from investment_research_desk.llm.clients import OllamaLLMClient
+from datetime import datetime, timezone
+
 from investment_research_desk.agents import (
     ConstructiveCaseAnalyst,
     FundamentalMacroAnalyst,
@@ -8,8 +9,11 @@ from investment_research_desk.agents import (
     SentimentAnalyst,
     TechnicalAnalyst,
 )
+from investment_research_desk.dataflows.interface import VendorRouteResult
 from investment_research_desk.llm import FakeLLMClient
+from investment_research_desk.llm.clients import OllamaLLMClient
 from investment_research_desk.providers.fixtures import FixtureProvider
+from investment_research_desk.schemas import NewsEvent, RunRequest
 
 
 def test_ollama_json_repair_path():
@@ -42,3 +46,31 @@ def test_all_seven_analysis_agents_call_llm():
     assert "Agent: bear_researcher" in called_agents
     assert "Agent: research_reporter" in called_agents
     assert "indicator_results" in called_agents
+
+
+def test_news_analyst_uses_llm_driven_tool_loop():
+    llm = FakeLLMClient()
+    request = RunRequest(symbol="BTC-USDT-SWAP", asset_class="crypto", horizon="short_term", llm_provider="fake")
+    calls: list[tuple[str, str]] = []
+    now = datetime.now(timezone.utc)
+
+    def route_tool(method: str, tool_request: RunRequest):
+        calls.append((method, tool_request.symbol))
+        return VendorRouteResult(
+            data=[
+                NewsEvent(
+                    title=f"{tool_request.symbol} relevant macro event",
+                    summary="Tool loop candidate",
+                    source="fake_news",
+                    published_at=now,
+                )
+            ],
+            status={"fake_news": "success"},
+        )
+
+    result, data = NewsImpactAnalyst().run_with_tools(request, llm, route_tool)
+
+    assert result.dominant_events
+    assert {method for method, _ in calls} == {"get_news", "get_global_news"}
+    assert data.source_metadata["tool_call_policy"] == "llm_driven_tool_loop"
+    assert data.source_metadata["llm_tool_calls"]

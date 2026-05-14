@@ -3,6 +3,7 @@ notepad.env
 .codex_refs/
 .venv/
 .pytest_cache/
+.tmp_*/
 __pycache__/
 *.py[cod]
 .coverage
@@ -13,4 +14,5 @@ build/
 dist/
 *.egg-info/
 runs/
+runs*/
 eval/results/

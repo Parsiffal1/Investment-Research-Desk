@@ -124,7 +124,7 @@ The seven analysis/research/reporting agents call the configured LLM through the
 The workflow enforces tool boundaries by having each analyst call only its allowed dataflow tools. `Data Ingestion` prepares fixture data or a live-run data shell; in live mode, the analyst workers fetch their own inputs and the workflow later merges the resulting normalized data into `normalized_data.json`:
 
 - `Fundamental/Macro Analyst`: calls `get_fundamentals` and macro/news tools, then reads fundamental metadata, quote metadata, and macro/news context.
-- `News/Macro Impact Analyst`: calls `get_news`, then reads news events only.
+- `News/Macro Impact Analyst`: uses an LLM-driven tool loop. The model sees `get_news` and `get_global_news`, chooses queries and call count, then returns schema-validated admitted evidence only.
 - `Sentiment Analyst`: calls `get_sentiment_inputs`, then reads sentiment inputs only.
 - `Technical Analyst`: calls `get_market_data`, calculates deterministic indicators in Python, then the LLM reads OHLCV and indicator results.
 - `Bull/Bear Researchers`: analyst outputs only, no direct external provider calls.

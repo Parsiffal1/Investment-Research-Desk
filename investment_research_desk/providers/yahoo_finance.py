@@ -52,7 +52,14 @@ class YahooFinanceProvider:
 
     def fetch_news(self, request: RunRequest) -> list[NewsEvent]:
         symbol = _normalize_symbol(request.symbol)
-        params = {"q": symbol, "quotesCount": 0, "newsCount": 10}
+        return self._search_news(symbol, related_asset=symbol)
+
+    def fetch_global_news(self, request: RunRequest) -> list[NewsEvent]:
+        query = request.symbol or "global markets macro crypto"
+        return self._search_news(query, related_asset=request.symbol, event_type="global_market_news")
+
+    def _search_news(self, query: str, related_asset: str, event_type: str = "market_news") -> list[NewsEvent]:
+        params = {"q": query, "quotesCount": 0, "newsCount": 10}
         with httpx.Client(timeout=self.timeout, headers={"User-Agent": _user_agent()}) as client:
             response = client.get("https://query1.finance.yahoo.com/v1/finance/search", params=params)
             if response.status_code >= 400:
@@ -76,8 +83,8 @@ class YahooFinanceProvider:
                     source=f"yahoo_finance:{item.get('publisher') or 'news'}",
                     published_at=published_at,
                     url=item.get("link"),
-                    event_type="market_news",
-                    related_assets=[symbol],
+                    event_type=event_type,
+                    related_assets=[related_asset],
                 )
             )
         return events
@@ -99,4 +106,3 @@ def _normalize_symbol(symbol: str) -> str:
 
 def _user_agent() -> str:
     return "investment-research-desk/0.1 (+local CLI)"
-

@@ -75,15 +75,15 @@ AGENT_CONTRACTS: dict[str, AgentContract] = {
     "news_impact": AgentContract(
         name="news_impact",
         team="analyst",
-        role="Classify recent news and macro events and summarize their possible asset impact.",
-        allowed_inputs=["RunRequest", "news_events"],
-        allowed_tools=["route_to_vendor.get_news", "news_event_classifier", "llm_json_refinement"],
+        role="Decide which news tools to call, classify candidate news/macro events, and summarize possible asset impact.",
+        allowed_inputs=["RunRequest", "tool results from get_news/get_global_news"],
+        allowed_tools=["route_to_vendor.get_news", "route_to_vendor.get_global_news", "news_event_classifier", "llm_tool_loop", "llm_json_refinement"],
         forbidden_actions=COMMON_FORBIDDEN_ACTIONS,
         output_schema="NewsImpactResult",
         system_prompt=(
-            "You are a News/Macro Impact Analyst. Analyze only supplied news events and macro headlines. "
-            "Return one JSON object with impact_logic and confidence when asked to refine output. "
-            "Avoid buy/sell/order/position-size language."
+            "You are a News/Macro Impact Analyst. Decide whether to call targeted news or global macro news tools, "
+            "choose the search queries, inspect returned candidate evidence, reject low-relevance items, and return "
+            "one structured JSON object. Avoid buy/sell/order/position-size language."
         ),
     ),
     "sentiment": AgentContract(

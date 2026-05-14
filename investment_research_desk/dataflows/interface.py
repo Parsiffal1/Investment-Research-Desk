@@ -20,7 +20,7 @@ from investment_research_desk.security import redact_secrets
 
 TOOLS_CATEGORIES = {
     "market_data": {"description": "OHLCV market data", "tools": ["get_market_data"]},
-    "news_data": {"description": "Ticker and macro news/events", "tools": ["get_news"]},
+    "news_data": {"description": "Ticker and macro news/events", "tools": ["get_news", "get_global_news"]},
     "sentiment_data": {"description": "Search/social/commentary sentiment inputs", "tools": ["get_sentiment_inputs"]},
     "fundamental_data": {"description": "Quote, profile, and company context", "tools": ["get_fundamentals"]},
 }
@@ -104,6 +104,12 @@ def _vendor_methods(settings: Settings) -> dict[str, dict[str, Callable[[RunRequ
     return {
         "get_market_data": {"okx": okx.fetch_ohlcv, "fmp": fmp.fetch_ohlcv, "yahoo_finance": yahoo.fetch_ohlcv},
         "get_news": {"jin10": jin10.fetch_news, "finnhub": finnhub.fetch_news, "yahoo_finance": yahoo.fetch_news},
+        "get_global_news": {
+            "jin10": jin10.fetch_global_news,
+            "finnhub": finnhub.fetch_global_news,
+            "yahoo_finance": yahoo.fetch_global_news,
+            "tavily": tavily.fetch_news_events,
+        },
         "get_sentiment_inputs": {
             "tavily": tavily.fetch_sentiment_inputs,
             "stocktwits": stocktwits.fetch_sentiment_inputs,

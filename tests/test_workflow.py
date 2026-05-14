@@ -113,6 +113,19 @@ def test_live_analysts_call_their_own_dataflow_tools(tmp_path: Path, monkeypatch
                 ],
                 status={"fake_news": "success"},
             )
+        if method == "get_global_news":
+            return VendorRouteResult(
+                data=[
+                    NewsEvent(
+                        title="Global macro liquidity event affects test asset",
+                        summary="Global macro test news",
+                        source="fake_global_news",
+                        published_at=now,
+                        event_type="global_market_news",
+                    )
+                ],
+                status={"fake_global_news": "success"},
+            )
         if method == "get_sentiment_inputs":
             return VendorRouteResult(
                 data=[SentimentInput(text="Market discussion is mixed but constructive", source="fake_social", timestamp=now)],
@@ -134,9 +147,11 @@ def test_live_analysts_call_their_own_dataflow_tools(tmp_path: Path, monkeypatch
     assert "get_market_data" in calls
     assert "get_sentiment_inputs" in calls
     assert "get_fundamentals" in calls
-    assert calls.count("get_news") == 2
+    assert calls.count("get_news") >= 2
+    assert "get_global_news" in calls
     assert state["data"]["source_metadata"]["tool_call_policy"] == "analyst_agents_called_allowed_tools"
     assert state["data"]["source_metadata"]["agent_tool_status"]["technical"]["get_market_data"] == {"fake_market": "success"}
     assert state["data"]["source_metadata"]["agent_tool_status"]["fundamental_macro"]["get_fundamentals"] == {
         "fake_fundamentals": "success"
     }
+    assert "get_global_news" in state["data"]["source_metadata"]["agent_tool_status"]["news_impact"]

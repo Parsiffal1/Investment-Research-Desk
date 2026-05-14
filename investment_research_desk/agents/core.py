@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel
 
@@ -9,9 +9,11 @@ from investment_research_desk.llm import LLMClient
 from investment_research_desk.schemas import (
     FinalResearchContext,
     FundamentalMacroResult,
+    NewsEvent,
     NewsImpactResult,
     NormalizedData,
     ResearchCase,
+    RunRequest,
     SentimentResult,
     TechnicalState,
     ViewLabel,
@@ -114,6 +116,106 @@ class NewsImpactAnalyst:
     name = "news_impact"
 
     def run(self, data: NormalizedData, llm: LLMClient) -> NewsImpactResult:
+        fallback = self._fallback(data)
+        return _llm_structured(
+            self.name,
+            llm,
+            {
+                "symbol": data.symbol,
+                "asset_class": data.asset_class,
+                "news_events": [event.model_dump(mode="json") for event in data.news_events[:12]],
+            },
+            NewsImpactResult,
+            fallback,
+        )
+
+    def run_with_tools(
+        self,
+        request: RunRequest,
+        llm: LLMClient,
+        route_tool: Callable[[str, RunRequest], Any],
+        max_rounds: int = 4,
+    ) -> tuple[NewsImpactResult, NormalizedData]:
+        collected_events: list[NewsEvent] = []
+        tool_status: dict[str, Any] = {}
+        tool_warnings: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+
+        def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+            if name not in {"get_news", "get_global_news"}:
+                return {"error": f"unsupported tool: {name}"}
+            query = str(arguments.get("query") or request.symbol).strip() or request.symbol
+            local_request = request.model_copy(update={"symbol": query})
+            result = route_tool(name, local_request)
+            events = [event for event in result.data if isinstance(event, NewsEvent)]
+            collected_events.extend(events)
+            tool_status[name] = result.status
+            tool_warnings.extend(result.warnings)
+            payload = {
+                "query": query,
+                "status": result.status,
+                "warnings": result.warnings,
+                "events": [event.model_dump(mode="json") for event in events[:8]],
+            }
+            tool_calls.append({"name": name, "arguments": arguments, "event_count": len(events), "status": result.status})
+            return payload
+
+        empty_data = NormalizedData(
+            symbol=request.symbol,
+            asset_class=request.asset_class,
+            horizon=request.horizon,
+            source_metadata={"provider_mode": "live", "tool_call_policy": "llm_driven_tool_loop"},
+        )
+        fallback = self._fallback(empty_data)
+        tools = _news_tool_specs()
+        contract = get_agent_contract(self.name)
+        user_prompt = (
+            f"Agent: {self.name}\n"
+            f"Instrument: {request.symbol}\n"
+            f"Asset class: {request.asset_class}\n"
+            f"Horizon: {request.horizon}\n"
+            "You decide whether to call tools, which query to use, how many times to call them, "
+            "whether to call get_global_news, and when to stop.\n"
+            "Treat tool outputs as candidate evidence, not admitted evidence. Reject unrelated company, sector, "
+            "or sponsored headlines unless you can explain a direct, sector, or macro link to the instrument.\n"
+            "Only include admitted evidence in dominant_events and evidence. If evidence is insufficient, say so "
+            "and lower confidence.\n\n"
+            "Available tools:\n"
+            "- get_news(query, limit): targeted symbol/topic news search.\n"
+            "- get_global_news(query, limit): broader macro/market news search.\n\n"
+            "Return exactly one JSON object matching this Pydantic JSON schema after you finish tool calls. "
+            "Do not add fields outside the schema. Do not use buy/sell/order/position-sizing/profit-guarantee language.\n\n"
+            f"Pydantic JSON schema:\n{json.dumps(NewsImpactResult.model_json_schema(), ensure_ascii=False, default=str)}\n\n"
+            f"Candidate output JSON:\n{json.dumps(fallback.model_dump(mode='json'), ensure_ascii=False, default=str)}"
+        )
+        try:
+            raw = llm.chat_tools_json(contract.system_prompt, user_prompt, tools, execute_tool, max_rounds=max_rounds)
+            raw_tool_calls = raw.pop("_tool_calls", [])
+            if raw_tool_calls:
+                tool_calls = raw_tool_calls
+            if isinstance(raw.get("result"), dict):
+                raw = raw["result"]
+            result = NewsImpactResult.model_validate(raw)
+        except Exception:
+            result = self._fallback(
+                NormalizedData(symbol=request.symbol, asset_class=request.asset_class, horizon=request.horizon, news_events=collected_events)
+            )
+        data = NormalizedData(
+            symbol=request.symbol,
+            asset_class=request.asset_class,
+            horizon=request.horizon,
+            news_events=_dedupe_news_events(collected_events),
+            source_metadata={
+                "provider_mode": "live",
+                "tool_call_policy": "llm_driven_tool_loop",
+                "agent_tool_status": {self.name: tool_status},
+                "warnings": tool_warnings,
+                "llm_tool_calls": tool_calls,
+            },
+        )
+        return result, data
+
+    def _fallback(self, data: NormalizedData) -> NewsImpactResult:
         dominant = [event.title for event in data.news_events[:5]]
         event_types: dict[str, str] = {}
         bullish = bearish = 0
@@ -127,24 +229,13 @@ class NewsImpactAnalyst:
             evidence.append(event.title)
         impact = _view_from_counts(bullish, bearish)
         impact_logic = _impact_logic(impact)
-        fallback = NewsImpactResult(
+        return NewsImpactResult(
             dominant_events=dominant or ["no material news events found"],
             event_type_summary=event_types or {"general": "low_importance"},
             asset_impact={data.symbol: impact},
             impact_logic=impact_logic,
             confidence=0.7 if dominant else 0.45,
             evidence=evidence[:5],
-        )
-        return _llm_structured(
-            self.name,
-            llm,
-            {
-                "symbol": data.symbol,
-                "asset_class": data.asset_class,
-                "news_events": [event.model_dump(mode="json") for event in data.news_events[:12]],
-            },
-            NewsImpactResult,
-            fallback,
         )
 
 
@@ -456,6 +547,54 @@ def _preserve_deterministic_fields(agent_name: str, result: TModel, fallback: TM
             }
         )
     return result
+
+
+def _news_tool_specs() -> list[dict[str, Any]]:
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query chosen by the analyst, such as BTC ETF flows, Bitcoin macro liquidity, or the exact instrument symbol.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of candidate events requested.",
+                "minimum": 1,
+                "maximum": 10,
+            },
+        },
+        "required": ["query"],
+    }
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_news",
+                "description": "Retrieve targeted candidate news for a symbol, asset, or specific market topic.",
+                "parameters": parameters,
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_global_news",
+                "description": "Retrieve broader macro, policy, liquidity, and cross-asset market news candidates.",
+                "parameters": parameters,
+            },
+        },
+    ]
+
+
+def _dedupe_news_events(events: list[NewsEvent]) -> list[NewsEvent]:
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[NewsEvent] = []
+    for event in events:
+        key = (event.title.strip().lower(), event.source.strip().lower(), event.published_at.isoformat())
+        if key not in seen:
+            deduped.append(event)
+            seen.add(key)
+    return deduped
 
 
 def _view_from_counts(positive: int, negative: int) -> ViewLabel:

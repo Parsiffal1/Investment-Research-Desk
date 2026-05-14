@@ -18,9 +18,18 @@ class Jin10NewsProvider:
     def fetch_news(self, request: RunRequest) -> list[NewsEvent]:
         if not self.api_url:
             return []
+        return self._fetch(request, query=request.symbol, event_type=None)
+
+    def fetch_global_news(self, request: RunRequest) -> list[NewsEvent]:
+        if not self.api_url:
+            return []
+        query = request.symbol or "global macro markets"
+        return self._fetch(request, query=query, event_type="global_market_news")
+
+    def _fetch(self, request: RunRequest, query: str, event_type: str | None) -> list[NewsEvent]:
         headers = {"x-api-key": self.api_key} if self.api_key else {}
         with httpx.Client(timeout=self.timeout) as client:
-            response = client.get(self.api_url, params={"q": request.symbol}, headers=headers)
+            response = client.get(self.api_url, params={"q": query}, headers=headers)
             response.raise_for_status()
         payload = response.json()
         items = payload.get("data", payload if isinstance(payload, list) else [])
@@ -41,9 +50,8 @@ class Jin10NewsProvider:
                     source="jin10",
                     published_at=published_at,
                     url=item.get("url"),
-                    event_type=item.get("event_type") or item.get("type"),
+                    event_type=event_type or item.get("event_type") or item.get("type"),
                     related_assets=[request.symbol],
                 )
             )
         return events
-
