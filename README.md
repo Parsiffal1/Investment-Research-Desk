@@ -55,7 +55,20 @@ APIs are out of scope.
 uv run ird okx check
 ```
 
-The baseline model target is Qwen3-8B Instruct/Chat. LoRA integration remains pending until training artifacts are produced; do not report improvement metrics until measured results exist.
+The baseline model target is Qwen3-8B Instruct/Chat. Sentiment LoRA tooling is available, but do not report improvement metrics until a trained adapter has been evaluated against the held-out suites.
+
+## Sentiment LoRA
+
+First-stage LoRA is limited to financial sentiment classification so results are directly comparable with the current baseline:
+
+```powershell
+uv run ird lora prepare-data --dry-run
+uv run ird lora prepare-data --output-dir lora_data/sentiment
+uv run ird lora train --data-dir lora_data/sentiment --dry-run
+uv run ird lora eval --adapter-path models/investment-research-desk-lora-sentiment/<run>/adapter --dry-run
+```
+
+Training is intended for a WSL2 CUDA environment with `torch`, `transformers`, `datasets`, `trl`, `peft`, `bitsandbytes`, and `accelerate` installed. The CLI writes PEFT adapter artifacts under `models/`, which is ignored by git. Data preparation writes `train/dev/eval` JSONL files and manifests with row and text hashes to prevent held-out leakage.
 
 ## CLI
 

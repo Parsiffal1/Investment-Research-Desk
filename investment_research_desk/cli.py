@@ -37,6 +37,7 @@ from investment_research_desk.config import load_settings
 from investment_research_desk.eval import run_eval_suite
 from investment_research_desk.graph import ResearchWorkflow
 from investment_research_desk.llm import OllamaLLMClient
+from investment_research_desk.lora import LoraTrainingConfig, eval_lora_sentiment, prepare_lora_data, train_lora_sentiment
 from investment_research_desk.persistence import RunStore
 from investment_research_desk.providers.okx import OkxMarketDataProvider
 from investment_research_desk.schemas import FinalResearchContext
@@ -52,6 +53,8 @@ config_app = typer.Typer(help="Configuration and runtime checks")
 app.add_typer(config_app, name="config")
 okx_app = typer.Typer(help="OKX public SWAP market checks")
 app.add_typer(okx_app, name="okx")
+lora_app = typer.Typer(help="LoRA sentiment fine-tuning workflows")
+app.add_typer(lora_app, name="lora")
 
 
 CLI_STYLE = questionary.Style(
@@ -526,6 +529,71 @@ def _metric_float(value: Any) -> str:
     if isinstance(value, (float, int)):
         return f"{value:.4f}"
     return str(value)
+
+
+@lora_app.command("prepare-data")
+def lora_prepare_data(
+    output_dir: Path = typer.Option(Path("lora_data/sentiment"), "--output-dir", help="Directory for LoRA JSONL and manifest files."),
+    dataset_dir: Optional[Path] = typer.Option(None, "--dataset-dir", help="Directory for cached Hugging Face rows."),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Optional per-split sample limit for local smoke tests."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Inspect split counts without writing files."),
+) -> None:
+    result = prepare_lora_data(output_dir=output_dir, dataset_dir=dataset_dir, limit=limit, dry_run=dry_run)
+    _print_lora_result("LoRA Data Preparation", result)
+
+
+@lora_app.command("train")
+def lora_train(
+    data_dir: Path = typer.Option(Path("lora_data/sentiment"), "--data-dir", help="Directory created by `ird lora prepare-data`."),
+    output_root: Path = typer.Option(Path("models/investment-research-desk-lora-sentiment"), "--output-root", help="Root directory for timestamped adapter output."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate config and show required packages without training."),
+) -> None:
+    config = LoraTrainingConfig(output_root=str(output_root))
+    result = train_lora_sentiment(data_dir=data_dir, output_root=output_root, config=config, dry_run=dry_run)
+    _print_lora_result("LoRA Training", result)
+
+
+@lora_app.command("eval")
+def lora_eval(
+    adapter_path: Path = typer.Option(..., "--adapter-path", help="Path to a saved PEFT adapter directory."),
+    output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Directory for heldout_eval_results.json."),
+    dataset_dir: Optional[Path] = typer.Option(None, "--dataset-dir", help="Directory for cached Hugging Face rows."),
+    limit: Optional[int] = typer.Option(None, "--limit", help="Optional per-dataset eval limit for smoke tests."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Inspect eval configuration without loading model weights."),
+) -> None:
+    target_output = output_dir or adapter_path.parent
+    result = eval_lora_sentiment(
+        adapter_path=adapter_path,
+        output_dir=target_output,
+        dataset_dir=dataset_dir,
+        limit=limit,
+        dry_run=dry_run,
+    )
+    _print_lora_result("LoRA Evaluation", result)
+
+
+def _print_lora_result(title: str, result: dict[str, Any]) -> None:
+    table = Table(title=title)
+    table.add_column("Field")
+    table.add_column("Value")
+    for key, value in result.items():
+        table.add_row(str(key), _format_lora_value(key, value))
+    console.print(table)
+
+
+def _format_lora_value(key: str, value: Any) -> str:
+    if key == "datasets" and isinstance(value, dict):
+        lines = []
+        for name, dataset in value.items():
+            if isinstance(dataset, dict):
+                lines.append(
+                    (
+                        f"{name}: train={dataset.get('train_samples')}, "
+                        f"dev={dataset.get('dev_samples')}, eval={dataset.get('eval_samples')}"
+                    )
+                )
+        return "\n".join(lines)
+    return _format_eval_value(key, value)
 
 
 @config_app.command("check")

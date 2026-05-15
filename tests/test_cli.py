@@ -130,3 +130,28 @@ def test_eval_console_formatter_summarizes_large_dataset_payload():
     assert "financial_phrasebank: samples=300" in formatted
     assert "0.8067" in formatted
     assert "predictions" not in formatted
+
+
+def test_cli_lora_dry_run_commands(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "investment_research_desk.cli.prepare_lora_data",
+        lambda **kwargs: {"status": "dry_run", "train_samples": 10, "eval_samples": 4},
+    )
+    monkeypatch.setattr(
+        "investment_research_desk.cli.train_lora_sentiment",
+        lambda **kwargs: {"status": "dry_run", "training_config": {"base_model": "Qwen/Qwen3-8B"}},
+    )
+    monkeypatch.setattr(
+        "investment_research_desk.cli.eval_lora_sentiment",
+        lambda **kwargs: {"status": "dry_run", "baseline": {"accuracy": 0.79}},
+    )
+
+    prepare = runner.invoke(app, ["lora", "prepare-data", "--output-dir", str(tmp_path), "--dry-run"])
+    train = runner.invoke(app, ["lora", "train", "--data-dir", str(tmp_path), "--output-root", str(tmp_path / "models"), "--dry-run"])
+    evaluate = runner.invoke(app, ["lora", "eval", "--adapter-path", str(tmp_path / "adapter"), "--dry-run"])
+
+    assert prepare.exit_code == 0
+    assert train.exit_code == 0
+    assert evaluate.exit_code == 0
+    assert "dry_run" in prepare.output
+    assert "Qwen/Qwen3-8B" in train.output

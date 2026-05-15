@@ -18,3 +18,5 @@ runs*/
 eval/results/
 eval/data/
 eval/tmp_*/
+models/
+lora_data/
