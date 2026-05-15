@@ -44,6 +44,12 @@ Smoke run:
 bash scripts/wsl/run_lora_pipeline.sh smoke
 ```
 
+Pilot run:
+
+```bash
+bash scripts/wsl/run_lora_pipeline.sh pilot
+```
+
 Full run:
 
 ```bash
@@ -70,3 +76,5 @@ Do not commit `models/` or `lora_data/`.
 - `train_eval_overlap`, `dev_eval_overlap`, and `train_dev_overlap` are all zero.
 - `heldout_eval_results.json` includes accuracy, Macro-F1, per-class metrics, output contract status, and baseline deltas.
 - README or resume metrics are updated only if measured LoRA held-out metrics beat the stored baseline.
+
+The default evaluation path uses forced-choice label scoring for classification metrics. Generative JSON evaluation is limited to a small contract-check sample so full held-out evaluation does not spend hours generating short labels.

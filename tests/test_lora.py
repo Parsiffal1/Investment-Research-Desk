@@ -66,8 +66,23 @@ def test_lora_sft_example_target_is_json_label_only():
     assistant = rows[0]["messages"][-1]
 
     assert assistant == {"role": "assistant", "content": '{"label": "positive"}'}
-    assert "<think" not in rows[0]["text"].lower()
+    assert rows[0]["text"].count("<think>\n\n</think>") == 1
+    assert rows[0]["text"].endswith('{"label": "positive"}<|im_end|>')
     assert "because" not in assistant["content"].lower()
+
+
+def test_lora_eval_dry_run_reports_forced_choice_method(tmp_path: Path):
+    result = sentiment.eval_lora_sentiment(
+        adapter_path=tmp_path / "adapter",
+        output_dir=tmp_path,
+        contract_limit=2,
+        score_batch_size=3,
+        dry_run=True,
+    )
+
+    assert result["eval_method"] == "forced_choice_label_scoring"
+    assert result["contract_limit"] == 2
+    assert result["score_batch_size"] == 3
 
 
 def test_lora_training_config_serializes_for_dry_run(tmp_path: Path):

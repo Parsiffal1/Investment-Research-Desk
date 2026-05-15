@@ -79,8 +79,11 @@ WSL2 CUDA setup and execution scripts are documented in `docs/lora_training_wsl.
 ```bash
 bash scripts/wsl/setup_lora_env.sh
 bash scripts/wsl/run_lora_pipeline.sh smoke
+bash scripts/wsl/run_lora_pipeline.sh pilot
 bash scripts/wsl/run_lora_pipeline.sh full
 ```
+
+LoRA evaluation uses forced-choice label scoring for Accuracy/Macro-F1 and a small generative JSON sample for output-contract checks. This keeps held-out evaluation practical while still checking that Qwen3 no-think JSON output does not emit `<think>` blocks or invalid labels.
 
 ## CLI
 

@@ -546,9 +546,10 @@ def lora_prepare_data(
 def lora_train(
     data_dir: Path = typer.Option(Path("lora_data/sentiment"), "--data-dir", help="Directory created by `ird lora prepare-data`."),
     output_root: Path = typer.Option(Path("models/investment-research-desk-lora-sentiment"), "--output-root", help="Root directory for timestamped adapter output."),
+    epochs: float = typer.Option(2.0, "--epochs", min=0.1, help="Number of training epochs."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Validate config and show required packages without training."),
 ) -> None:
-    config = LoraTrainingConfig(output_root=str(output_root))
+    config = LoraTrainingConfig(output_root=str(output_root), num_train_epochs=epochs)
     result = train_lora_sentiment(data_dir=data_dir, output_root=output_root, config=config, dry_run=dry_run)
     _print_lora_result("LoRA Training", result)
 
@@ -559,6 +560,8 @@ def lora_eval(
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Directory for heldout_eval_results.json."),
     dataset_dir: Optional[Path] = typer.Option(None, "--dataset-dir", help="Directory for cached Hugging Face rows."),
     limit: Optional[int] = typer.Option(None, "--limit", help="Optional per-dataset eval limit for smoke tests."),
+    contract_limit: int = typer.Option(6, "--contract-limit", min=0, help="Per-dataset generative JSON contract-check sample size."),
+    score_batch_size: int = typer.Option(4, "--score-batch-size", min=1, help="Batch size for forced-choice label scoring."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Inspect eval configuration without loading model weights."),
 ) -> None:
     target_output = output_dir or adapter_path.parent
@@ -567,6 +570,8 @@ def lora_eval(
         output_dir=target_output,
         dataset_dir=dataset_dir,
         limit=limit,
+        contract_limit=contract_limit,
+        score_batch_size=score_batch_size,
         dry_run=dry_run,
     )
     _print_lora_result("LoRA Evaluation", result)

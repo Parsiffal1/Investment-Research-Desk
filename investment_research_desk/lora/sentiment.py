@@ -223,6 +223,8 @@ def eval_lora_sentiment(
     output_dir: Path,
     dataset_dir: Path | None = None,
     limit: int | None = None,
+    contract_limit: int = 6,
+    score_batch_size: int = 4,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     if dry_run:
@@ -230,6 +232,9 @@ def eval_lora_sentiment(
             "status": "dry_run",
             "adapter_path": str(adapter_path),
             "limit": limit,
+            "contract_limit": contract_limit,
+            "score_batch_size": score_batch_size,
+            "eval_method": "forced_choice_label_scoring",
             "baseline": BASELINE_METRICS,
         }
     _require_eval_packages()
@@ -251,15 +256,38 @@ def eval_lora_sentiment(
     model = PeftModel.from_pretrained(model, adapter_path)
     model.eval()
     dataset_results: dict[str, Any] = {}
+    contract_results: dict[str, Any] = {}
     for dataset_key, spec in LORA_DATASETS.items():
         eval_spec = {**spec, "split": spec["eval_split"]}
         examples = _load_examples(dataset_key, eval_spec, dataset_dir, limit)
+        scored_predictions = _score_adapter_labels(model, tokenizer, dataset_key, spec["labels"], examples, score_batch_size)
         predictions = []
-        for index, item in enumerate(examples, start=1):
-            predicted, violations = _generate_adapter_label(model, tokenizer, dataset_key, spec["labels"], item["text"])
+        for index, (item, scored) in enumerate(zip(examples, scored_predictions, strict=True), start=1):
             expected = item["label"]
             predictions.append(
-                {"index": index, "expected": expected, "predicted": predicted, "correct": predicted == expected, "text": item["text"], "output_violations": violations}
+                {
+                    "index": index,
+                    "expected": expected,
+                    "predicted": scored["label"],
+                    "correct": scored["label"] == expected,
+                    "text": item["text"],
+                    "score_margin": scored["score_margin"],
+                    "label_scores": scored["label_scores"],
+                }
+            )
+        contract_predictions = []
+        for index, item in enumerate(examples[: max(contract_limit, 0)], start=1):
+            predicted, violations, raw_text = _generate_adapter_label(model, tokenizer, dataset_key, spec["labels"], item["text"])
+            contract_predictions.append(
+                {
+                    "index": index,
+                    "expected": item["label"],
+                    "predicted": predicted,
+                    "correct": predicted == item["label"],
+                    "text": item["text"],
+                    "raw_output": raw_text,
+                    "output_violations": violations,
+                }
             )
         metrics = suites._classification_metrics(
             [item["expected"] for item in predictions],
@@ -276,17 +304,32 @@ def eval_lora_sentiment(
             "per_class": metrics["per_class"],
             "predictions": predictions,
         }
+        contract_results[dataset_key] = {
+            "dataset": spec["dataset"],
+            "split": spec["eval_split"],
+            "labels": spec["labels"],
+            "samples": len(contract_predictions),
+            "predictions": contract_predictions,
+        }
     accuracy_values = [item["accuracy"] for item in dataset_results.values()]
     macro_values = [item["macro_f1"] for item in dataset_results.values()]
+    output_contract = suites._sentiment_output_contract(contract_results)
+    violations = output_contract.get("violations", {})
+    output_contract["status"] = "pass" if not any(violations.values()) else "fail"
     result = {
-        "status": "pass",
+        "status": "pass" if output_contract["status"] == "pass" else "fail",
         "adapter_path": str(adapter_path),
+        "eval_method": "forced_choice_label_scoring",
+        "contract_check_method": "generative_json_sample",
+        "contract_limit_per_dataset": max(contract_limit, 0),
+        "score_batch_size": score_batch_size,
         "baseline": BASELINE_METRICS,
         "accuracy": sum(accuracy_values) / len(accuracy_values) if accuracy_values else 0.0,
         "macro_f1": sum(macro_values) / len(macro_values) if macro_values else 0.0,
         "baseline_delta": {},
-        "output_contract": suites._sentiment_output_contract(dataset_results),
+        "output_contract": output_contract,
         "datasets": dataset_results,
+        "contract_samples": contract_results,
     }
     result["baseline_delta"] = {
         "accuracy": result["accuracy"] - BASELINE_METRICS["accuracy"],
@@ -338,10 +381,14 @@ def _format_sft_examples(dataset_key: str, labels: list[str], examples: list[dic
 
 
 def _chat_text(dataset_key: str, label_list: str, text: str, label: str) -> str:
+    return _chat_prompt(dataset_key, label_list, text) + json.dumps({"label": label}, ensure_ascii=False) + "<|im_end|>"
+
+
+def _chat_prompt(dataset_key: str, label_list: str, text: str) -> str:
     return (
         f"<|im_start|>system\n/no_think\nJSON only. Choose one label: {label_list}. Schema: {{\"label\":\"<label>\"}}<|im_end|>\n"
-        f"<|im_start|>user\ndataset: {dataset_key}\nlabels: {label_list}\ntext: {text}<|im_end|>\n"
-        f"<|im_start|>assistant\n{json.dumps({'label': label}, ensure_ascii=False)}<|im_end|>"
+        f"<|im_start|>user\ndataset: {dataset_key}\nlabels: {label_list}\ntext: {text}\n/no_think<|im_end|>\n"
+        "<|im_start|>assistant\n<think>\n\n</think>\n\n"
     )
 
 
@@ -413,11 +460,63 @@ def _in_memory_leakage_check(
     }
 
 
-def _generate_adapter_label(model: Any, tokenizer: Any, dataset_key: str, labels: list[str], text: str) -> tuple[str, list[str]]:
+def _score_adapter_labels(
+    model: Any,
+    tokenizer: Any,
+    dataset_key: str,
+    labels: list[str],
+    examples: list[dict[str, Any]],
+    batch_size: int,
+) -> list[dict[str, Any]]:
+    import torch
+    import torch.nn.functional as F
+
+    rows: list[tuple[int, str, str, int]] = []
+    for example_index, item in enumerate(examples):
+        label_list = ", ".join(labels)
+        prompt = _chat_prompt(dataset_key, label_list, item["text"])
+        prompt_len = len(tokenizer(prompt, add_special_tokens=False)["input_ids"])
+        for label in labels:
+            continuation = json.dumps({"label": label}, ensure_ascii=False) + "<|im_end|>"
+            rows.append((example_index, label, prompt + continuation, prompt_len))
+
+    scores_by_example: list[dict[str, float]] = [dict() for _item in examples]
+    batch_size = max(batch_size, 1)
+    for start in range(0, len(rows), batch_size):
+        batch = rows[start : start + batch_size]
+        encoded = tokenizer([row[2] for row in batch], return_tensors="pt", padding=True, add_special_tokens=False).to(model.device)
+        with torch.no_grad():
+            logits = model(**encoded).logits
+        input_ids = encoded["input_ids"]
+        attention_mask = encoded["attention_mask"]
+        shift_logits = logits[:, :-1, :].contiguous()
+        shift_labels = input_ids[:, 1:].contiguous()
+        shift_mask = attention_mask[:, 1:].contiguous()
+        token_losses = F.cross_entropy(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+            reduction="none",
+        ).view(shift_labels.shape)
+        for row_index, (example_index, label, _text, prompt_len) in enumerate(batch):
+            candidate_mask = torch.zeros_like(shift_mask[row_index], dtype=torch.bool)
+            candidate_mask[max(prompt_len - 1, 0) :] = shift_mask[row_index, max(prompt_len - 1, 0) :].bool()
+            loss = token_losses[row_index][candidate_mask].mean().item() if candidate_mask.any() else float("inf")
+            scores_by_example[example_index][label] = -loss
+
+    predictions: list[dict[str, Any]] = []
+    for label_scores in scores_by_example:
+        ordered = sorted(label_scores.items(), key=lambda item: item[1], reverse=True)
+        best_label = ordered[0][0] if ordered else labels[0]
+        margin = ordered[0][1] - ordered[1][1] if len(ordered) > 1 else 0.0
+        predictions.append({"label": best_label, "score_margin": margin, "label_scores": label_scores})
+    return predictions
+
+
+def _generate_adapter_label(model: Any, tokenizer: Any, dataset_key: str, labels: list[str], text: str) -> tuple[str, list[str], str]:
     import torch
 
     label_list = ", ".join(labels)
-    prompt = _chat_text(dataset_key, label_list, text, "").rsplit("<|im_start|>assistant", 1)[0] + "<|im_start|>assistant\n"
+    prompt = _chat_prompt(dataset_key, label_list, text)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         generated = model.generate(**inputs, max_new_tokens=suites.SENTIMENT_EVAL_MAX_TOKENS, do_sample=False)
@@ -428,7 +527,7 @@ def _generate_adapter_label(model: Any, tokenizer: Any, dataset_key: str, labels
         raw = {}
     violations = suites._sentiment_output_violations(raw, decoded, "", labels)
     label = str(raw.get("label") or "").strip().lower()
-    return (label if label in labels else labels[0]), violations
+    return (label if label in labels else labels[0]), violations, decoded
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
