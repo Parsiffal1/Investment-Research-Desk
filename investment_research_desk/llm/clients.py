@@ -16,6 +16,17 @@ class LLMClient(Protocol):
     def chat_json(self, system: str, user: str) -> dict:
         ...
 
+    def chat_json_options(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        seed: int | None = None,
+    ) -> dict:
+        ...
+
     def chat_tools_json(
         self,
         system: str,
@@ -42,12 +53,31 @@ class FakeLLMClient:
         candidate = _candidate_from_prompt(user)
         if candidate is not None:
             return candidate
+        try:
+            payload = json.loads(user)
+            if isinstance(payload, dict) and isinstance(payload.get("items"), list):
+                allowed = payload.get("allowed_labels") or ["neutral"]
+                label = allowed[0] if isinstance(allowed, list) and allowed else "neutral"
+                return {"predictions": [{"id": item.get("id"), "label": label} for item in payload["items"]]}
+        except json.JSONDecodeError:
+            pass
         lowered = f"{system}\n{user}".lower()
         if "sentiment" in lowered:
             return {"label": "mixed", "score": 0.0, "summary": "Fixture-backed mixed sentiment."}
         if "news" in lowered or "impact" in lowered:
             return {"impact": "mixed", "summary": "Macro events create mixed market impact."}
         return {"summary": "Deterministic fixture-backed research output."}
+
+    def chat_json_options(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        seed: int | None = None,
+    ) -> dict:
+        return self.chat_json(system, user)
 
     def chat_tools_json(
         self,
@@ -82,13 +112,26 @@ class OllamaLLMClient:
         self.timeout = timeout
 
     def chat_json(self, system: str, user: str) -> dict:
-        content = self._chat_content(system, user)
+        return self.chat_json_options(system, user, temperature=0.1)
+
+    def chat_json_options(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        seed: int | None = None,
+    ) -> dict:
+        content = self._chat_content(system, user, temperature=temperature, max_tokens=max_tokens, seed=seed)
         try:
             return _parse_json_object(content)
         except (JSONDecodeError, ValueError):
             repair_system = "Return only one valid JSON object. Do not include markdown or commentary."
             repair_user = f"Repair this invalid JSON-like output into valid JSON:\n{content}"
-            return _parse_json_object(self._chat_content(repair_system, repair_user))
+            return _parse_json_object(
+                self._chat_content(repair_system, repair_user, temperature=0.0, max_tokens=max_tokens, seed=seed)
+            )
 
     def chat_tools_json(
         self,
@@ -153,7 +196,14 @@ class OllamaLLMClient:
         parsed["_tool_calls"] = tool_calls_log
         return parsed
 
-    def _chat_content(self, system: str, user: str) -> str:
+    def _chat_content(
+        self,
+        system: str,
+        user: str,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        seed: int | None = None,
+    ) -> str:
         return self._chat_message(
             [
                 {"role": "system", "content": system},
@@ -161,6 +211,9 @@ class OllamaLLMClient:
             ],
             tools=[],
             response_format={"type": "json_object"},
+            temperature=temperature,
+            max_tokens=max_tokens,
+            seed=seed,
         )["content"]
 
     def _chat_message(
@@ -168,12 +221,19 @@ class OllamaLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         response_format: dict[str, str] | None,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        seed: int | None = None,
     ) -> dict[str, Any]:
         payload = {
             "model": self.model,
-            "temperature": 0.1,
+            "temperature": temperature,
             "messages": messages,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if seed is not None:
+            payload["seed"] = seed
         if response_format:
             payload["response_format"] = response_format
         if tools:

@@ -55,6 +55,7 @@ def run_eval_suite(
     limit: int | None = None,
     dataset_dir: Path | None = None,
     train_manifest: Path | None = None,
+    batch_size: int = 8,
 ) -> dict[str, Any]:
     settings = settings or load_settings()
     results_dir = results_dir or Path("eval/results")
@@ -81,6 +82,7 @@ def run_eval_suite(
             limit=limit,
             dataset_dir=dataset_dir,
             train_manifest=train_manifest,
+            batch_size=batch_size,
         )
     else:
         raise ValueError(f"Unsupported eval suite: {suite}")
@@ -198,6 +200,7 @@ def _sentiment_baseline_suite(
     limit: int | None,
     dataset_dir: Path | None,
     train_manifest: Path | None,
+    batch_size: int,
 ) -> dict[str, Any]:
     llm = make_llm_client(settings, llm_provider, model)
     started = datetime.now(timezone.utc)
@@ -206,24 +209,7 @@ def _sentiment_baseline_suite(
     for dataset_key, spec in SENTIMENT_DATASETS.items():
         examples = _load_sentiment_dataset(dataset_key, spec, dataset_dir=dataset_dir, limit=limit)
         manifest_entries.extend(_manifest_entries(dataset_key, spec, examples))
-        predictions = []
-        for index, item in enumerate(examples, start=1):
-            predicted = _predict_sentiment_label(
-                llm,
-                text=item["text"],
-                labels=spec["labels"],
-                dataset_name=dataset_key,
-            )
-            expected = item["label"]
-            predictions.append(
-                {
-                    "index": index,
-                    "expected": expected,
-                    "predicted": predicted,
-                    "correct": predicted == expected,
-                    "text": item["text"],
-                }
-            )
+        predictions = _predict_sentiment_batches(llm, examples, spec["labels"], dataset_key, batch_size=max(1, batch_size))
         y_true = [item["expected"] for item in predictions]
         y_pred = [item["predicted"] for item in predictions]
         metrics = _classification_metrics(y_true, y_pred, labels=spec["labels"])
@@ -250,6 +236,7 @@ def _sentiment_baseline_suite(
         "model": model or settings.ollama_model,
         "llm_provider": llm_provider,
         "limit_per_dataset": limit,
+        "batch_size": max(1, batch_size),
         "data_leakage_policy": (
             "This suite uses only held-out evaluation splits. LoRA/SFT data preparation must exclude these "
             "dataset+config+split pairs and should write train/eval manifests before training."
@@ -433,6 +420,52 @@ def _stratified_limit(examples: list[dict[str, str]], labels: list[str], limit: 
     return selected
 
 
+def _predict_sentiment_batches(
+    llm,
+    examples: list[dict[str, str]],
+    labels: list[str],
+    dataset_name: str,
+    batch_size: int,
+) -> list[dict[str, Any]]:
+    predictions: list[dict[str, Any]] = []
+    for offset in range(0, len(examples), batch_size):
+        batch = examples[offset : offset + batch_size]
+        batch_predictions = _predict_sentiment_batch(llm, batch, labels, dataset_name)
+        predictions.extend(
+            {
+                "index": offset + item_index,
+                "expected": item["label"],
+                "predicted": batch_predictions.get(item_index, labels[0]),
+                "correct": batch_predictions.get(item_index, labels[0]) == item["label"],
+                "text": item["text"],
+            }
+            for item_index, item in enumerate(batch, start=1)
+        )
+    return predictions
+
+
+def _predict_sentiment_batch(llm, batch: list[dict[str, str]], labels: list[str], dataset_name: str) -> dict[int, str]:
+    label_list = ", ".join(labels)
+    items = [{"id": index, "text": item["text"]} for index, item in enumerate(batch, start=1)]
+    system = (
+        "You are a strict financial sentiment classifier. Return exactly one JSON object with field "
+        "\"predictions\" as an array of {\"id\": number, \"label\": string}. "
+        f"Allowed labels: {label_list}. Use only allowed labels. Classify each item independently. Do not explain."
+    )
+    user = json.dumps({"dataset": dataset_name, "allowed_labels": labels, "items": items}, ensure_ascii=False)
+    try:
+        raw = _chat_json_for_eval(llm, system, user, max_tokens=max(128, 24 * len(batch)))
+        parsed = _parse_batch_predictions(raw, labels)
+        if len(parsed) == len(batch):
+            return parsed
+    except Exception:
+        pass
+    return {
+        index: _predict_sentiment_label(llm, item["text"], labels, dataset_name)
+        for index, item in enumerate(batch, start=1)
+    }
+
+
 def _predict_sentiment_label(llm, text: str, labels: list[str], dataset_name: str) -> str:
     label_list = ", ".join(labels)
     system = (
@@ -446,11 +479,35 @@ def _predict_sentiment_label(llm, text: str, labels: list[str], dataset_name: st
         "Classify the sentiment."
     )
     try:
-        raw = llm.chat_json(system, user)
+        raw = _chat_json_for_eval(llm, system, user, max_tokens=32)
     except Exception:
         return labels[0]
     label = str(raw.get("label") or "").strip().lower()
     return label if label in labels else labels[0]
+
+
+def _chat_json_for_eval(llm, system: str, user: str, max_tokens: int) -> dict[str, Any]:
+    if hasattr(llm, "chat_json_options"):
+        return llm.chat_json_options(system, user, temperature=0.0, max_tokens=max_tokens, seed=42)
+    return llm.chat_json(system, user)
+
+
+def _parse_batch_predictions(raw: dict[str, Any], labels: list[str]) -> dict[int, str]:
+    predictions = raw.get("predictions")
+    if not isinstance(predictions, list):
+        return {}
+    parsed: dict[int, str] = {}
+    for item in predictions:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_id = int(item.get("id"))
+        except Exception:
+            continue
+        label = str(item.get("label") or "").strip().lower()
+        if label in labels:
+            parsed[item_id] = label
+    return parsed
 
 
 def _classification_metrics(y_true: list[str], y_pred: list[str], labels: list[str]) -> dict[str, Any]:
