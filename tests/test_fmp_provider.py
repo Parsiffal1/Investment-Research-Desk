@@ -26,6 +26,31 @@ def test_fmp_market_data_uses_free_light_endpoint(monkeypatch):
     assert bars[0].volume == 1000
 
 
+def test_fmp_news_uses_symbol_scoped_stock_endpoint(monkeypatch):
+    provider = FmpProvider("test-key")
+    calls: list[tuple[str, dict]] = []
+
+    def fake_get(endpoint, params):
+        calls.append((endpoint, params))
+        return [
+            {
+                "title": "SPDR S&P 500 ETF Trust tracks equity rally",
+                "text": "Market-focused article",
+                "site": "example",
+                "publishedDate": "2026-05-14T12:00:00Z",
+                "url": "https://example.com/spy",
+            }
+        ]
+
+    monkeypatch.setattr(provider, "_get", fake_get)
+
+    events = provider.fetch_news(RunRequest(symbol="SPY", asset_class="equity"))
+
+    assert calls == [("news/stock", {"symbols": "SPY"})]
+    assert events[0].title == "SPDR S&P 500 ETF Trust tracks equity rally"
+    assert events[0].related_assets == ["SPY"]
+
+
 def test_okx_market_data_skips_non_swap_equity(monkeypatch):
     provider = OkxMarketDataProvider()
 

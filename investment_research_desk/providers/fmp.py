@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from investment_research_desk.schemas import OHLCVBar, RunRequest
+from investment_research_desk.schemas import NewsEvent, OHLCVBar, RunRequest
 
 
 class FmpProvider:
@@ -33,6 +33,41 @@ class FmpProvider:
         if isinstance(data, list) and data:
             return data[0]
         return None
+
+    def fetch_news(self, request: RunRequest) -> list[NewsEvent]:
+        if not self.api_key:
+            return []
+        symbol = _news_symbol(request)
+        endpoint = _news_endpoint(request.asset_class)
+        if not symbol or not endpoint:
+            return []
+        data = self._get(endpoint, {"symbols": symbol})
+        if not isinstance(data, list):
+            return []
+        events: list[NewsEvent] = []
+        for item in data[:10]:
+            title = item.get("title") or item.get("headline")
+            if not title:
+                continue
+            published = item.get("publishedDate") or item.get("date") or item.get("published_at")
+            try:
+                published_at = datetime.fromisoformat(str(published).replace("Z", "+00:00"))
+                if published_at.tzinfo is None:
+                    published_at = published_at.replace(tzinfo=timezone.utc)
+            except Exception:
+                published_at = datetime.now(timezone.utc)
+            events.append(
+                NewsEvent(
+                    title=title,
+                    summary=item.get("text") or item.get("site") or item.get("summary"),
+                    source=f"fmp:{item.get('site') or 'news'}",
+                    published_at=published_at,
+                    url=item.get("url"),
+                    event_type=_news_event_type(request.asset_class),
+                    related_assets=[symbol],
+                )
+            )
+        return events
 
     def fetch_ohlcv(self, request: RunRequest) -> list[OHLCVBar]:
         if not self.api_key:
@@ -74,6 +109,32 @@ class FmpProvider:
 
 def _normalize_equity_symbol(symbol: str) -> str:
     return symbol.split(":")[-1].split("-")[0] if "-USDT" in symbol else symbol.upper()
+
+
+def _news_symbol(request: RunRequest) -> str:
+    if request.asset_class == "crypto":
+        return request.symbol.upper().replace("-USDT-SWAP", "USD").replace("-USD-SWAP", "USD").replace("-", "")
+    if request.asset_class == "fx":
+        return request.symbol.upper().replace("/", "").replace("-", "")
+    return _normalize_equity_symbol(request.symbol)
+
+
+def _news_endpoint(asset_class: str) -> str | None:
+    if asset_class == "crypto":
+        return "news/crypto"
+    if asset_class == "fx":
+        return "news/forex"
+    if asset_class in {"equity", "equity_index", "other"}:
+        return "news/stock"
+    return None
+
+
+def _news_event_type(asset_class: str) -> str:
+    if asset_class == "crypto":
+        return "crypto_news"
+    if asset_class == "fx":
+        return "forex_news"
+    return "market_news"
 
 
 def _row_float(row: dict, *keys: str, default: float | None = None) -> float:

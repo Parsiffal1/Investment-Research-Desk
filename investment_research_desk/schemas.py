@@ -36,6 +36,7 @@ class RunRequest(BaseModel):
     fixture: str | None = None
     llm_provider: Literal["auto", "fake", "ollama"] = "auto"
     model: str | None = None
+    tool_query: str | None = Field(default=None, exclude=True)
 
 
 class OHLCVBar(BaseModel):

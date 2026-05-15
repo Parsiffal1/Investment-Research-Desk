@@ -18,7 +18,7 @@ class TavilySearchProvider:
     def fetch_sentiment_inputs(self, request: RunRequest) -> list[SentimentInput]:
         if not self.api_key:
             return []
-        query = f"{request.symbol} market news macro sentiment"
+        query = request.tool_query or f"{request.symbol} market news macro sentiment"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(
@@ -43,7 +43,7 @@ class TavilySearchProvider:
     def fetch_news_events(self, request: RunRequest) -> list[NewsEvent]:
         if not self.api_key:
             return []
-        query = request.symbol or "global markets macro news"
+        query = request.tool_query or request.symbol or "global markets macro news"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(

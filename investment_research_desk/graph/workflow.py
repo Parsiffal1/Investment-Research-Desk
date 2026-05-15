@@ -441,8 +441,7 @@ class ResearchWorkflow:
         per_tool_counts[name] = per_tool_counts.get(name, 0) + 1
         query = str(arguments.get("query") or request.symbol).strip() or request.symbol
         symbol = str(arguments.get("symbol") or request.symbol).strip() or request.symbol
-        local_symbol = query if name in {"get_news", "get_global_news"} else symbol
-        local_request = request.model_copy(update={"symbol": local_symbol})
+        local_request = request.model_copy(update={"symbol": symbol, "tool_query": query})
         result = route_to_vendor(name, self.settings, local_request)
         collected["tool_status"][name] = result.status
         collected["warnings"].extend(result.warnings)
@@ -496,6 +495,7 @@ class ResearchWorkflow:
     @staticmethod
     def _agent_tool_loop_prompt(agent_name: str, request: RunRequest, tool_names: list[str]) -> str:
         tool_lines = "\n".join(f"- {name}" for name in tool_names)
+        financial_scope = _financial_tool_query_instruction(request)
         return (
             f"Agent: {agent_name}\n"
             f"Instrument: {request.symbol}\n"
@@ -503,6 +503,7 @@ class ResearchWorkflow:
             f"Horizon: {request.horizon}\n\n"
             "Use the available tools to collect only the evidence this agent needs. "
             "Before calling a tool, refine the query or symbol argument for this instrument. "
+            f"{financial_scope} "
             "Call tools only while they add useful evidence, then stop and return a compact JSON object with a summary. "
             "Do not make financial advice, order, or position-size statements.\n\n"
             f"Available tools:\n{tool_lines}"
@@ -511,7 +512,9 @@ class ResearchWorkflow:
     @staticmethod
     def _default_tool_arguments(name: str, request: RunRequest) -> dict[str, Any]:
         if name in {"get_news", "get_global_news"}:
-            return {"query": request.symbol, "limit": 5}
+            return {"symbol": request.symbol, "query": _default_financial_query(request), "limit": 5}
+        if name == "get_sentiment_inputs":
+            return {"symbol": request.symbol, "query": _default_financial_query(request)}
         return {"symbol": request.symbol}
 
     @staticmethod
@@ -528,17 +531,34 @@ class ResearchWorkflow:
                 "required": ["symbol"],
             },
             "get_news": {
-                "description": "Retrieve targeted symbol, issuer, asset, or sector news using a refined query.",
-                "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10}},
+                "description": (
+                    "Retrieve targeted financial news. Keep symbol as the exact ticker/instrument for ticker-scoped "
+                    "APIs and put the expanded finance-specific search phrase in query."
+                ),
+                "properties": {
+                    "symbol": {"type": "string"},
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                },
                 "required": ["query"],
             },
             "get_global_news": {
-                "description": "Retrieve broader macro, policy, liquidity, and cross-asset market news.",
-                "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 10}},
+                "description": (
+                    "Retrieve broader macro, policy, liquidity, and cross-asset market news with a finance-specific "
+                    "query. Include symbol when the macro query is anchored to the instrument."
+                ),
+                "properties": {
+                    "symbol": {"type": "string"},
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+                },
                 "required": ["query"],
             },
             "get_sentiment_inputs": {
-                "description": "Retrieve search/social/commentary sentiment inputs for the instrument.",
+                "description": (
+                    "Retrieve search/social/commentary sentiment inputs for the financial instrument. Keep symbol "
+                    "exact for ticker-scoped social APIs and put expanded finance-specific terms in query."
+                ),
                 "properties": {"symbol": {"type": "string"}, "query": {"type": "string"}},
                 "required": ["symbol"],
             },
@@ -1236,6 +1256,43 @@ def _guardrail_summary(metrics: dict[str, Any]) -> str:
         return "pending during report render"
     violations = metrics.get("guardrail_violations", [])
     return ", ".join(violations) if violations else "None"
+
+
+def _financial_tool_query_instruction(request: RunRequest) -> str:
+    default_query = _default_financial_query(request)
+    return (
+        "Interpret the instrument as a financial market symbol. Do not use a naturally ambiguous bare ticker as the "
+        f"only web/search query. Keep symbol='{request.symbol}' for ticker-scoped APIs; use finance-specific query "
+        f"phrases such as '{default_query}' for search APIs. Reject non-financial meanings before admitting evidence."
+    )
+
+
+def _default_financial_query(request: RunRequest) -> str:
+    symbol = request.symbol.upper()
+    aliases = {
+        "SPY": "SPDR S&P 500 ETF Trust S&P 500 ETF market news flows macro rates earnings",
+        "QQQ": "Invesco QQQ Trust Nasdaq 100 ETF market news mega-cap technology flows",
+        "DIA": "SPDR Dow Jones Industrial Average ETF market news Dow blue chip equities",
+        "IWM": "iShares Russell 2000 ETF small-cap equities market news",
+        "GLD": "SPDR Gold Shares gold ETF bullion market news real rates dollar",
+        "SLV": "iShares Silver Trust silver ETF metals market news dollar real rates",
+    }
+    if symbol in aliases:
+        return aliases[symbol]
+    if request.asset_class == "crypto":
+        base = symbol.replace("-USDT-SWAP", "").replace("-USD-SWAP", "").replace("-USDT", "").replace("-USD", "")
+        return f"{base} crypto perpetual swap market news funding ETF regulation liquidity"
+    if request.asset_class == "equity_index":
+        return f"{symbol} equity index ETF market news flows macro rates earnings"
+    if request.asset_class == "equity":
+        return f"{symbol} stock company news earnings guidance analyst rating sector market"
+    if request.asset_class == "precious_metal":
+        return f"{symbol} precious metals futures ETF market news real rates dollar inflation"
+    if request.asset_class == "commodity":
+        return f"{symbol} commodity futures market news supply demand macro"
+    if request.asset_class == "fx":
+        return f"{symbol} foreign exchange market news central bank rates macro"
+    return f"{symbol} financial market news macro sector issuer"
 
 
 def _dedupe_news_events(events: list[NewsEvent]) -> list[NewsEvent]:

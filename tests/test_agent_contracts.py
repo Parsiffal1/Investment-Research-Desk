@@ -34,6 +34,15 @@ def test_agent_contract_manifest_covers_workflow_nodes():
         assert any("buy" in action and "sell" in action for action in contract.forbidden_actions)
 
 
+def test_search_capable_agent_prompts_require_financial_query_expansion():
+    for name in ("fundamental_macro", "news_impact", "sentiment"):
+        prompt = get_agent_contract(name).system_prompt
+        assert "financial markets" in prompt
+        assert "bare ticker" in prompt
+        assert "ticker-scoped APIs" in prompt
+        assert "SPDR S&P 500 ETF Trust" in prompt
+
+
 def test_agent_data_scopes_do_not_expose_unrelated_inputs():
     data = FixtureProvider().load("gold_cpi")
 

@@ -55,7 +55,7 @@ class YahooFinanceProvider:
         return self._search_news(symbol, related_asset=symbol)
 
     def fetch_global_news(self, request: RunRequest) -> list[NewsEvent]:
-        query = request.symbol or "global markets macro crypto"
+        query = request.tool_query or request.symbol or "global markets macro crypto"
         return self._search_news(query, related_asset=request.symbol, event_type="global_market_news")
 
     def _search_news(self, query: str, related_asset: str, event_type: str = "market_news") -> list[NewsEvent]:

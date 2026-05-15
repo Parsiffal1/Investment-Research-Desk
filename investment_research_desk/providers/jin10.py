@@ -18,12 +18,12 @@ class Jin10NewsProvider:
     def fetch_news(self, request: RunRequest) -> list[NewsEvent]:
         if not self.api_url:
             return []
-        return self._fetch(request, query=request.symbol, event_type=None)
+        return self._fetch(request, query=request.tool_query or request.symbol, event_type=None)
 
     def fetch_global_news(self, request: RunRequest) -> list[NewsEvent]:
         if not self.api_url:
             return []
-        query = request.symbol or "global macro markets"
+        query = request.tool_query or request.symbol or "global macro markets"
         return self._fetch(request, query=query, event_type="global_market_news")
 
     def _fetch(self, request: RunRequest, query: str, event_type: str | None) -> list[NewsEvent]:

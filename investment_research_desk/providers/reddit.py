@@ -20,7 +20,7 @@ class RedditProvider:
         self.subreddits = subreddits
 
     def fetch_sentiment_inputs(self, request: RunRequest) -> list[SentimentInput]:
-        symbol = _normalize_symbol(request.symbol)
+        symbol = request.tool_query or _normalize_symbol(request.symbol)
         all_inputs: list[SentimentInput] = []
         with httpx.Client(timeout=self.timeout, headers={"User-Agent": "investment-research-desk/0.1"}) as client:
             for index, subreddit in enumerate(self.subreddits):
@@ -55,4 +55,3 @@ class RedditProvider:
 
 def _normalize_symbol(symbol: str) -> str:
     return symbol.upper().split(":")[-1].split("-")[0]
-

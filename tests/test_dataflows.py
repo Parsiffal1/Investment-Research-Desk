@@ -28,3 +28,4 @@ def test_targeted_news_route_includes_tavily_fallback():
     settings = load_settings()
 
     assert "tavily" in _vendor_methods(settings)["get_news"]
+    assert "fmp" in _vendor_methods(settings)["get_news"]

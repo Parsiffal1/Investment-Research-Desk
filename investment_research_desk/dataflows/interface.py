@@ -105,6 +105,7 @@ def _vendor_methods(settings: Settings) -> dict[str, dict[str, Callable[[RunRequ
         "get_market_data": {"okx": okx.fetch_ohlcv, "fmp": fmp.fetch_ohlcv, "yahoo_finance": yahoo.fetch_ohlcv},
         "get_swap_market_context": {"okx": okx.fetch_swap_market_context},
         "get_news": {
+            "fmp": fmp.fetch_news,
             "jin10": jin10.fetch_news,
             "finnhub": finnhub.fetch_news,
             "yahoo_finance": yahoo.fetch_news,

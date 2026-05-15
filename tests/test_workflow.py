@@ -181,3 +181,48 @@ def test_live_analysts_call_their_own_dataflow_tools(tmp_path: Path, monkeypatch
         "fake_fundamentals": "success"
     }
     assert "get_global_news" in state["data"]["source_metadata"]["agent_tool_status"]["news_impact"]
+
+
+def test_news_tool_call_preserves_symbol_and_passes_refined_query(tmp_path: Path, monkeypatch):
+    seen: list[RunRequest] = []
+
+    def fake_route_to_vendor(method, settings, request):
+        seen.append(request)
+        return VendorRouteResult(data=[], status={"fake": "empty"})
+
+    monkeypatch.setattr("investment_research_desk.graph.workflow.route_to_vendor", fake_route_to_vendor)
+    workflow = ResearchWorkflow(settings=load_settings(), runs_dir=tmp_path)
+    request = RunRequest(symbol="SPY", asset_class="equity", horizon="short_term", llm_provider="fake")
+    collected = {
+        "ohlcv": [],
+        "news_events": [],
+        "sentiment_inputs": [],
+        "market_context": {},
+        "source_metadata": {},
+        "tool_status": {},
+        "warnings": [],
+        "tool_calls": [],
+        "contract_floor_calls": [],
+        "executed_tool_count": 0,
+        "max_tool_calls": 4,
+        "executed_tool_counts": {},
+    }
+
+    workflow._execute_agent_tool(
+        "news_impact",
+        request,
+        "get_news",
+        {"symbol": "SPY", "query": "SPDR S&P 500 ETF Trust market news"},
+        collected,
+    )
+
+    assert seen[0].symbol == "SPY"
+    assert seen[0].tool_query == "SPDR S&P 500 ETF Trust market news"
+
+
+def test_default_news_tool_arguments_expand_ambiguous_spy_query():
+    args = ResearchWorkflow._default_tool_arguments("get_news", RunRequest(symbol="SPY", asset_class="equity"))
+
+    assert args["symbol"] == "SPY"
+    assert "SPDR S&P 500 ETF Trust" in args["query"]
+    assert args["query"] != "SPY"
