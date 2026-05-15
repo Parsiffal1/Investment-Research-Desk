@@ -24,9 +24,8 @@ class RunStore:
     def write_json(self, run_id: str, name: str, value: Any) -> Path:
         path = self.ensure_run_dir(run_id) / name
         if isinstance(value, BaseModel):
-            text = value.model_dump_json(indent=2)
-        else:
-            text = json.dumps(value, ensure_ascii=False, indent=2, default=str)
+            value = value.model_dump(mode="json")
+        text = json.dumps(value, ensure_ascii=True, indent=2, default=str)
         path.write_text(text + "\n", encoding="utf-8")
         return path
 
@@ -57,4 +56,3 @@ class RunStore:
         path = self.run_dir(run_id)
         if path.exists():
             shutil.rmtree(path)
-
