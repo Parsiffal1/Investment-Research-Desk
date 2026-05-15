@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from investment_research_desk.config import load_settings
@@ -35,18 +34,7 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
             return self.chat_json_options(system, user)
 
         def chat_json_options(self, system: str, user: str, **kwargs) -> dict:
-            if '"items"' in user:
-                payload = json.loads(user)
-                return {
-                    "predictions": [
-                        {"id": item["id"], "choice": self._choice(item["options"], self._label(system, item["text"]))}
-                        for item in payload["items"]
-                    ]
-                }
-
-            options_text = user.split("Options: ", 1)[1].split("\n", 1)[0]
-            options = json.loads(options_text)
-            return {"choice": self._choice(options, self._label(system, user))}
+            return {"label": self._label(system, user)}
 
         @staticmethod
         def _label(system: str, text: str) -> str:
@@ -60,13 +48,6 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
             if "loss widened" in lowered:
                 return "negative"
             return "neutral"
-
-        @staticmethod
-        def _choice(options: dict, label: str) -> str:
-            for choice, option_label in options.items():
-                if option_label == label:
-                    return choice
-            return "A"
 
         def healthcheck(self):
             return True, "ok"
@@ -87,17 +68,17 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
     monkeypatch.setattr(suites, "make_llm_client", lambda *args, **kwargs: RuleLLM())
     monkeypatch.setattr(suites, "_load_sentiment_dataset", fake_loader)
 
-    result = run_eval_suite("sentiment-baseline", results_dir=tmp_path, llm_provider="fake", limit=3, batch_size=3)
+    result = run_eval_suite("sentiment-baseline", results_dir=tmp_path, llm_provider="fake", limit=3)
 
     assert result["status"] == "pass"
     assert result["accuracy"] == 1.0
     assert result["macro_f1"] == 1.0
-    assert result["batch_size"] == 3
+    assert result["batch_size"] == 1
     assert result["datasets"]["financial_phrasebank"]["split"] == "test"
     assert result["datasets"]["twitter_financial_news_sentiment"]["split"] == "validation"
     first_prediction = result["datasets"]["financial_phrasebank"]["predictions"][0]
-    assert set(first_prediction["label_options"]) == {"A", "B", "C"}
-    assert first_prediction["predicted_choice"] in {"A", "B", "C"}
+    assert "label_options" not in first_prediction
+    assert "predicted_choice" not in first_prediction
     assert result["leakage_check"]["status"] == "not_checked_no_train_manifest"
     assert Path(result["artifacts"]["manifest"]).exists()
     assert list(tmp_path.glob("*_sentiment-baseline.json"))
@@ -114,21 +95,6 @@ def test_sentiment_limit_is_stratified():
     selected = suites._stratified_limit(examples, ["negative", "neutral", "positive"], 3)
 
     assert [item["label"] for item in selected] == ["negative", "neutral", "positive"]
-
-
-def test_batch_prediction_parser_accepts_valid_labels_only():
-    raw = {"predictions": [{"id": 1, "choice": "B"}, {"id": 2, "choice": "D"}]}
-
-    assert suites._parse_batch_predictions(raw, {"A", "B", "C"}) == {1: "B"}
-
-
-def test_stable_label_options_permute_labels_without_loss():
-    labels = ["negative", "neutral", "positive"]
-
-    options = suites._stable_label_options(labels, "sample-key")
-
-    assert set(options) == {"A", "B", "C"}
-    assert set(options.values()) == set(labels)
 
 
 def test_leakage_check_detects_train_eval_overlap(tmp_path: Path):
