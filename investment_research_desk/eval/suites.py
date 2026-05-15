@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import json
+import hashlib
 import re
 import time
 from datetime import datetime, timezone
@@ -55,7 +55,7 @@ def run_eval_suite(
     limit: int | None = None,
     dataset_dir: Path | None = None,
     train_manifest: Path | None = None,
-    batch_size: int = 1,
+    batch_size: int = 8,
 ) -> dict[str, Any]:
     settings = settings or load_settings()
     results_dir = results_dir or Path("eval/results")
@@ -209,7 +209,7 @@ def _sentiment_baseline_suite(
     for dataset_key, spec in SENTIMENT_DATASETS.items():
         examples = _load_sentiment_dataset(dataset_key, spec, dataset_dir=dataset_dir, limit=limit)
         manifest_entries.extend(_manifest_entries(dataset_key, spec, examples))
-        predictions = _predict_sentiment_labels(llm, examples, spec["labels"], dataset_key)
+        predictions = _predict_sentiment_batches(llm, examples, spec["labels"], dataset_key, batch_size=max(1, batch_size))
         y_true = [item["expected"] for item in predictions]
         y_pred = [item["predicted"] for item in predictions]
         metrics = _classification_metrics(y_true, y_pred, labels=spec["labels"])
@@ -236,7 +236,7 @@ def _sentiment_baseline_suite(
         "model": model or settings.ollama_model,
         "llm_provider": llm_provider,
         "limit_per_dataset": limit,
-        "batch_size": 1,
+        "batch_size": max(1, batch_size),
         "data_leakage_policy": (
             "This suite uses only held-out evaluation splits. LoRA/SFT data preparation must exclude these "
             "dataset+config+split pairs and should write train/eval manifests before training."
@@ -420,51 +420,125 @@ def _stratified_limit(examples: list[dict[str, str]], labels: list[str], limit: 
     return selected
 
 
-def _predict_sentiment_labels(
+def _predict_sentiment_batches(
     llm,
     examples: list[dict[str, str]],
     labels: list[str],
     dataset_name: str,
+    batch_size: int,
 ) -> list[dict[str, Any]]:
     predictions: list[dict[str, Any]] = []
-    for index, item in enumerate(examples, start=1):
-        predicted_label = _predict_sentiment_label(llm, item["text"], labels, dataset_name)
-        predictions.append(
-            {
-                "index": index,
-                "expected": item["label"],
-                "predicted": predicted_label,
-                "correct": predicted_label == item["label"],
-                "text": item["text"],
-            }
-        )
+    for offset in range(0, len(examples), batch_size):
+        batch = examples[offset : offset + batch_size]
+        batch_inputs = [
+            _classification_item(item, labels, dataset_name, offset + item_index)
+            for item_index, item in enumerate(batch, start=1)
+        ]
+        batch_predictions = _predict_sentiment_batch(llm, batch_inputs, dataset_name)
+        for item_index, (item, batch_input) in enumerate(zip(batch, batch_inputs), start=1):
+            predicted_choice = batch_predictions.get(item_index, "A")
+            predicted_label = batch_input["label_options"].get(predicted_choice, batch_input["label_options"]["A"])
+            predictions.append(
+                {
+                    "index": offset + item_index,
+                    "expected": item["label"],
+                    "predicted": predicted_label,
+                    "correct": predicted_label == item["label"],
+                    "text": item["text"],
+                    "label_options": batch_input["label_options"],
+                    "predicted_choice": predicted_choice,
+                }
+            )
     return predictions
 
 
-def _predict_sentiment_label(llm, text: str, labels: list[str], dataset_name: str) -> str:
-    label_list = ", ".join(labels)
+def _classification_item(item: dict[str, str], labels: list[str], dataset_name: str, stable_index: int) -> dict[str, Any]:
+    label_key = f"{dataset_name}:{item.get('row_idx')}:{stable_index}:{item['text']}"
+    return {
+        "text": item["text"],
+        "label_options": _stable_label_options(labels, label_key),
+    }
+
+
+def _stable_label_options(labels: list[str], key: str) -> dict[str, str]:
+    ordered = list(labels)
+    digest = hashlib.sha256(key.encode("utf-8")).digest()
+    for index in range(len(ordered) - 1, 0, -1):
+        swap_index = digest[index % len(digest)] % (index + 1)
+        ordered[index], ordered[swap_index] = ordered[swap_index], ordered[index]
+    return {chr(ord("A") + index): label for index, label in enumerate(ordered)}
+
+
+def _predict_sentiment_batch(llm, batch: list[dict[str, Any]], dataset_name: str) -> dict[int, str]:
+    items = [
+        {
+            "id": index,
+            "text": item["text"],
+            "options": item["label_options"],
+        }
+        for index, item in enumerate(batch, start=1)
+    ]
+    system = (
+        "You are a strict financial sentiment classifier. Return exactly one JSON object with field "
+        "\"predictions\" as an array of {\"id\": number, \"choice\": \"A|B|C\"}. "
+        "Each item has its own A/B/C option mapping. Use only the option codes shown for that item. "
+        "Classify each item independently. Do not explain."
+    )
+    user = json.dumps({"dataset": dataset_name, "items": items}, ensure_ascii=False)
+    try:
+        raw = _chat_json_for_eval(llm, system, user, max_tokens=max(128, 24 * len(batch)))
+        parsed = _parse_batch_predictions(raw, set(batch[0]["label_options"].keys()) if batch else set())
+        if len(parsed) == len(batch):
+            return parsed
+    except Exception:
+        pass
+    return {
+        index: _predict_sentiment_choice(llm, item["text"], item["label_options"], dataset_name)
+        for index, item in enumerate(batch, start=1)
+    }
+
+
+def _predict_sentiment_choice(llm, text: str, label_options: dict[str, str], dataset_name: str) -> str:
     system = (
         "You are a strict financial sentiment classifier. Return exactly one valid JSON object with one field: "
-        f"{{\"label\":\"one of: {label_list}\"}}. Use only the allowed labels. Do not explain."
+        "{\"choice\":\"A|B|C\"}. Use only the option codes shown. Do not explain."
     )
     user = (
         f"Dataset: {dataset_name}\n"
-        f"Allowed labels: {label_list}\n\n"
+        f"Options: {json.dumps(label_options, ensure_ascii=False)}\n\n"
         f"Financial text:\n{text}\n\n"
         "Classify the sentiment."
     )
     try:
         raw = _chat_json_for_eval(llm, system, user, max_tokens=32)
     except Exception:
-        return labels[0]
-    label = str(raw.get("label") or "").strip().lower()
-    return label if label in labels else labels[0]
+        return "A"
+    choice = str(raw.get("choice") or "").strip().upper()
+    return choice if choice in label_options else "A"
 
 
 def _chat_json_for_eval(llm, system: str, user: str, max_tokens: int) -> dict[str, Any]:
     if hasattr(llm, "chat_json_options"):
         return llm.chat_json_options(system, user, temperature=0.0, max_tokens=max_tokens, seed=42)
     return llm.chat_json(system, user)
+
+
+def _parse_batch_predictions(raw: dict[str, Any], allowed_choices: set[str]) -> dict[int, str]:
+    predictions = raw.get("predictions")
+    if not isinstance(predictions, list):
+        return {}
+    parsed: dict[int, str] = {}
+    for item in predictions:
+        if not isinstance(item, dict):
+            continue
+        try:
+            item_id = int(item.get("id"))
+        except Exception:
+            continue
+        choice = str(item.get("choice") or "").strip().upper()
+        if choice in allowed_choices:
+            parsed[item_id] = choice
+    return parsed
 
 
 def _classification_metrics(y_true: list[str], y_pred: list[str], labels: list[str]) -> dict[str, Any]:

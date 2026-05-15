@@ -466,7 +466,7 @@ def eval_command(
     limit: Optional[int] = typer.Option(100, "--limit", help="Limit examples per sentiment dataset. Use 0 for the full held-out split."),
     dataset_dir: Optional[Path] = typer.Option(None, "--dataset-dir", help="Directory for cached held-out sentiment datasets."),
     train_manifest: Optional[Path] = typer.Option(None, "--train-manifest", help="Optional LoRA/SFT train manifest for leakage checks."),
-    batch_size: int = typer.Option(1, "--batch-size", min=1, help="Currently fixed at 1 for clean sentiment baseline calls."),
+    batch_size: int = typer.Option(8, "--batch-size", min=1, help="Micro-batch size for sentiment baseline model calls."),
     results_dir: Optional[Path] = typer.Option(None, "--results-dir", help="Override eval results directory."),
 ) -> None:
     result = run_eval_suite(

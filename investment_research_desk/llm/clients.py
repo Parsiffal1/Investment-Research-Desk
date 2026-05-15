@@ -56,11 +56,9 @@ class FakeLLMClient:
         try:
             payload = json.loads(user)
             if isinstance(payload, dict) and isinstance(payload.get("items"), list):
-                allowed = payload.get("allowed_labels") or ["neutral"]
-                label = allowed[0] if isinstance(allowed, list) and allowed else "neutral"
                 return {
                     "predictions": [
-                        {"id": item.get("id"), "label": label}
+                        {"id": item.get("id"), "choice": sorted((item.get("options") or {"A": ""}).keys())[0]}
                         for item in payload["items"]
                     ]
                 }
