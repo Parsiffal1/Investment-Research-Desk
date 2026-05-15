@@ -24,6 +24,7 @@ from investment_research_desk.agents import (
 from investment_research_desk.config import Settings, load_settings
 from investment_research_desk.dataflows import route_to_vendor
 from investment_research_desk.llm import make_llm_client
+from investment_research_desk.sentiment_runtime import make_sentiment_classifier
 from investment_research_desk.persistence import RunStore
 from investment_research_desk.providers import FixtureProvider
 from investment_research_desk.schemas import (
@@ -188,7 +189,8 @@ class ResearchWorkflow:
             request = RunRequest.model_validate(s["request"])
             data = self._scope_data(NormalizedData.model_validate(s["data"]), "sentiment")
             llm = self._make_llm(request, s)
-            sentiment = SentimentAnalyst().run(data, llm)
+            classifier = self._make_sentiment_classifier_for_request(request)
+            sentiment = SentimentAnalyst().run(data, llm, classifier)
             s["sentiment"] = sentiment.model_dump(mode="json")
             self._write_analyst_outputs(s)
             return s
@@ -363,7 +365,10 @@ class ResearchWorkflow:
                 max_rounds=3,
             )
         )
-        result = SentimentAnalyst().run(data, self._make_llm_for_request(request))
+        classifier = self._make_sentiment_classifier_for_request(request)
+        if classifier is not None:
+            data.source_metadata["sentiment_runtime"] = classifier.runtime_metadata()
+        result = SentimentAnalyst().run(data, self._make_llm_for_request(request), classifier)
         return result, data
 
     def _run_technical_agent(self, request: RunRequest, seed_data: NormalizedData):
@@ -971,6 +976,9 @@ class ResearchWorkflow:
             request.model,
             allow_fake_fallback=bool(request.fixture),
         )
+
+    def _make_sentiment_classifier_for_request(self, request: RunRequest):
+        return make_sentiment_classifier(self.settings, request)
 
     def _write_analyst_outputs(self, state: WorkflowState) -> None:
         outputs = {

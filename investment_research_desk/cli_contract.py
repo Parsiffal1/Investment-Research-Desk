@@ -40,10 +40,17 @@ class LLMProviderOption(str, Enum):
     ollama = "ollama"
 
 
+class SentimentProviderOption(str, Enum):
+    main = "main"
+    hf_peft = "hf-peft"
+    fake = "fake"
+
+
 ALLOWED_ASSET_CLASSES = tuple(item.value for item in AssetClassOption)
 ALLOWED_HORIZONS = tuple(item.value for item in HorizonOption)
 ALLOWED_RESEARCH_DEPTHS = tuple(item.value for item in ResearchDepthOption)
 ALLOWED_LLM_PROVIDERS = tuple(item.value for item in LLMProviderOption)
+ALLOWED_SENTIMENT_PROVIDERS = tuple(item.value for item in SentimentProviderOption)
 
 REQUIRED_ARTIFACTS = (
     "input.json",
@@ -102,9 +109,19 @@ def build_run_request(
     fixture: str | None,
     llm_provider: str | LLMProviderOption,
     model: str | None,
+    sentiment_provider: str | SentimentProviderOption | None = None,
+    sentiment_base_model: str | None = None,
+    sentiment_adapter_path: str | Path | None = None,
+    sentiment_score_batch_size: int | None = None,
 ) -> RunRequest:
     provider = normalize_enum_value(llm_provider, ALLOWED_LLM_PROVIDERS, "llm_provider")
     depth = normalize_enum_value(research_depth, ALLOWED_RESEARCH_DEPTHS, "research_depth")
+    normalized_sentiment_provider = (
+        normalize_enum_value(sentiment_provider, ALLOWED_SENTIMENT_PROVIDERS, "sentiment_provider")
+        if sentiment_provider is not None
+        else None
+    )
+    normalized_adapter_path = str(sentiment_adapter_path) if sentiment_adapter_path else None
 
     try:
         if fixture:
@@ -112,6 +129,10 @@ def build_run_request(
             request.llm_provider = provider  # type: ignore[assignment]
             request.model = model
             request.research_depth = depth  # type: ignore[assignment]
+            request.sentiment_provider = normalized_sentiment_provider  # type: ignore[assignment]
+            request.sentiment_base_model = sentiment_base_model.strip() if sentiment_base_model and sentiment_base_model.strip() else None
+            request.sentiment_adapter_path = normalized_adapter_path
+            request.sentiment_score_batch_size = sentiment_score_batch_size
             return request
 
         normalized_symbol = (symbol or "").strip().upper()
@@ -131,6 +152,10 @@ def build_run_request(
             research_depth=depth,  # type: ignore[arg-type]
             llm_provider=provider,  # type: ignore[arg-type]
             model=model.strip() if model and model.strip() else None,
+            sentiment_provider=normalized_sentiment_provider,  # type: ignore[arg-type]
+            sentiment_base_model=sentiment_base_model.strip() if sentiment_base_model and sentiment_base_model.strip() else None,
+            sentiment_adapter_path=normalized_adapter_path,
+            sentiment_score_batch_size=sentiment_score_batch_size,
         )
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc

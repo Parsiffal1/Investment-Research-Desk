@@ -85,6 +85,27 @@ def test_interactive_style_symbol_normalization_and_asset_inference():
     assert crypto.asset_class == "crypto"
 
 
+def test_build_run_request_accepts_sentiment_adapter_contract(tmp_path):
+    request = build_run_request(
+        symbol="eth-usdt-swap",
+        asset_class="auto",
+        horizon="short_term",
+        research_depth="standard",
+        fixture=None,
+        llm_provider="ollama",
+        model="qwen3:8b",
+        sentiment_provider="hf-peft",
+        sentiment_base_model="Qwen/Qwen3-8B",
+        sentiment_adapter_path=tmp_path / "adapter",
+        sentiment_score_batch_size=2,
+    )
+
+    assert request.sentiment_provider == "hf-peft"
+    assert request.sentiment_base_model == "Qwen/Qwen3-8B"
+    assert request.sentiment_adapter_path == str(tmp_path / "adapter")
+    assert request.sentiment_score_batch_size == 2
+
+
 def test_cli_runs_lists_checkpoint(tmp_path):
     report_result = runner.invoke(
         app,

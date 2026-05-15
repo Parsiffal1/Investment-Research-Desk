@@ -36,6 +36,10 @@ class RunRequest(BaseModel):
     fixture: str | None = None
     llm_provider: Literal["auto", "fake", "ollama"] = "auto"
     model: str | None = None
+    sentiment_provider: Literal["main", "hf-peft", "fake"] | None = None
+    sentiment_base_model: str | None = None
+    sentiment_adapter_path: str | None = None
+    sentiment_score_batch_size: int | None = Field(default=None, ge=1, le=16)
     tool_query: str | None = Field(default=None, exclude=True)
 
 

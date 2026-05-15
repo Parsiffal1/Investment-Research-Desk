@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from investment_research_desk.config import load_settings
 from investment_research_desk.dataflows.interface import VendorRouteResult
 from investment_research_desk.graph import ResearchWorkflow
+from investment_research_desk.sentiment_runtime import FakeSentimentClassifier
 from investment_research_desk.schemas import FinalResearchContext, NewsEvent, OHLCVBar, RunRequest, SentimentInput
 
 
@@ -181,6 +182,28 @@ def test_live_analysts_call_their_own_dataflow_tools(tmp_path: Path, monkeypatch
         "fake_fundamentals": "success"
     }
     assert "get_global_news" in state["data"]["source_metadata"]["agent_tool_status"]["news_impact"]
+
+
+def test_sentiment_adapter_runtime_is_used_only_by_sentiment_agent(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "investment_research_desk.graph.workflow.make_sentiment_classifier",
+        lambda settings, request: FakeSentimentClassifier(),
+    )
+    workflow = ResearchWorkflow(settings=load_settings(), runs_dir=tmp_path)
+    request = RunRequest(
+        symbol="XAU-USDT-SWAP",
+        asset_class="precious_metal",
+        fixture="gold_cpi",
+        llm_provider="fake",
+        sentiment_provider="fake",
+    )
+
+    state = workflow.run(request, checkpoint=False)
+
+    assert state["sentiment"]["sentiment_label"] in {"bullish", "bearish", "neutral", "mixed"}
+    assert "sentiment_runtime" in state["data"]["source_metadata"]
+    assert state["data"]["source_metadata"]["sentiment_runtime"]["provider"] == "fake"
+    assert state["data"]["source_metadata"]["agent_tool_status"]["sentiment"] == {"fixture": "success"}
 
 
 def test_news_tool_call_preserves_symbol_and_passes_refined_query(tmp_path: Path, monkeypatch):

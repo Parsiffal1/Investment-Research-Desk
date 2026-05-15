@@ -32,6 +32,7 @@ from investment_research_desk.tools.indicators import (
 )
 from investment_research_desk.agents.contracts import get_agent_contract
 from investment_research_desk.agents.prompts import STRUCTURED_JSON_RULES
+from investment_research_desk.sentiment_runtime import SentimentClassifier, aggregate_predictions
 
 TModel = TypeVar("TModel", bound=BaseModel)
 
@@ -116,7 +117,7 @@ class FundamentalMacroAnalyst:
             confidence=0.66,
             evidence=[event.title for event in evidence_events[:3]],
         )
-        return _llm_structured(
+        result = _llm_structured(
             self.name,
             llm,
             {
@@ -134,6 +135,7 @@ class FundamentalMacroAnalyst:
             FundamentalMacroResult,
             fallback,
         )
+        return result
 
 
 class NewsImpactAnalyst:
@@ -144,7 +146,7 @@ class NewsImpactAnalyst:
         relevant_events, ranked_events = _filter_relevant_news_events(data.news_events, request)
         scoped_data = data.model_copy(update={"news_events": relevant_events or data.news_events})
         fallback = self._fallback(scoped_data)
-        return _llm_structured(
+        result = _llm_structured(
             self.name,
             llm,
             {
@@ -156,6 +158,7 @@ class NewsImpactAnalyst:
             NewsImpactResult,
             fallback,
         )
+        return result
 
     def run_with_tools(
         self,
@@ -388,7 +391,7 @@ class NewsImpactAnalyst:
 class SentimentAnalyst:
     name = "sentiment"
 
-    def run(self, data: NormalizedData, llm: LLMClient) -> SentimentResult:
+    def run(self, data: NormalizedData, llm: LLMClient, sentiment_classifier: SentimentClassifier | None = None) -> SentimentResult:
         texts = [item.text for item in data.sentiment_inputs]
         joined = " ".join(texts).lower()
         bullish = sum(1 for term in BULLISH_TERMS if term in joined)
@@ -415,23 +418,57 @@ class SentimentAnalyst:
             evidence=evidence,
             confidence=0.68 if texts else 0.35,
         )
-        return _llm_structured(
+        adapter_payload: dict[str, Any] | None = None
+        if sentiment_classifier is not None and data.sentiment_inputs:
+            try:
+                predictions = sentiment_classifier.classify(data.sentiment_inputs)
+                fallback = aggregate_predictions(data.sentiment_inputs, predictions)
+                adapter_payload = {
+                    "runtime": sentiment_classifier.runtime_metadata(),
+                    "aggregate": fallback.model_dump(mode="json"),
+                    "classifications": [
+                        {
+                            "label": row.label,
+                            "score_margin": row.score_margin,
+                            "label_scores": row.label_scores,
+                            "source": row.source,
+                            "text": row.text,
+                        }
+                        for row in predictions[:20]
+                    ],
+                }
+            except Exception as exc:
+                fallback.evidence = [f"sentiment adapter unavailable: {exc}", *fallback.evidence]
+        result = _llm_structured(
             self.name,
             llm,
             {
                 "symbol": data.symbol,
                 "asset_class": data.asset_class,
                 "sentiment_inputs": [item.model_dump(mode="json") for item in data.sentiment_inputs[:20]],
+                "sentiment_adapter": adapter_payload,
                 "structured_sentiment_blocks": _sentiment_source_blocks(data.sentiment_inputs),
                 "instruction": (
                     "Read sentiment as pre-collected source blocks. Distinguish institutional/news framing, retail "
                     "posts, community discussion, sponsored material, and generic market chatter. Weight sample size, "
-                    "source quality, and direct relevance to the instrument before selecting evidence."
+                    "source quality, and direct relevance to the instrument before selecting evidence. If "
+                    "sentiment_adapter is present, use its aggregate label and score as the classification authority "
+                    "and use the main LLM only to summarize evidence and caveats."
                 ),
             },
             SentimentResult,
             fallback,
         )
+        if adapter_payload is not None:
+            return result.model_copy(
+                update={
+                    "crowd_mood": fallback.crowd_mood,
+                    "sentiment_label": fallback.sentiment_label,
+                    "sentiment_score": fallback.sentiment_score,
+                    "confidence": fallback.confidence,
+                }
+            )
+        return result
 
 
 class TechnicalAnalyst:

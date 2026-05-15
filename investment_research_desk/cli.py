@@ -29,6 +29,7 @@ from investment_research_desk.cli_contract import (
     LLMProviderOption,
     REQUIRED_ARTIFACTS,
     ResearchDepthOption,
+    SentimentProviderOption,
     TEAM_FLOW,
     build_run_request,
     discover_runs,
@@ -189,6 +190,10 @@ def interactive() -> None:
             resume=contract.resume_run_id,
             clear_checkpoints=contract.clear_checkpoints,
             runs_dir=contract.runs_dir,
+            sentiment_provider=None,
+            sentiment_base_model=None,
+            sentiment_adapter_path=None,
+            sentiment_score_batch_size=None,
         )
         return
     if contract.request is None:
@@ -246,6 +251,10 @@ def _collect_interactive_contract() -> CLIInteractionContract:
             fixture=None,
             llm_provider=LLMProviderOption.ollama,
             model=settings.ollama_model,
+            sentiment_provider=None,
+            sentiment_base_model=None,
+            sentiment_adapter_path=None,
+            sentiment_score_batch_size=None,
         )
     except ValueError as exc:
         _exit_with_error(str(exc))
@@ -279,6 +288,10 @@ def demo(
         resume=None,
         clear_checkpoints=False,
         runs_dir=runs_dir,
+        sentiment_provider=None,
+        sentiment_base_model=None,
+        sentiment_adapter_path=None,
+        sentiment_score_batch_size=None,
     )
 
 
@@ -291,6 +304,10 @@ def report(
     fixture: Optional[str] = typer.Option(None, "--fixture", help="Run from frozen fixture data."),
     llm_provider: LLMProviderOption = typer.Option(LLMProviderOption.auto, "--llm-provider", help="auto, fake, or ollama."),
     model: Optional[str] = typer.Option(None, "--model", help="Override model name."),
+    sentiment_provider: Optional[SentimentProviderOption] = typer.Option(None, "--sentiment-provider", help="main, fake, or hf-peft."),
+    sentiment_base_model: Optional[str] = typer.Option(None, "--sentiment-base-model", help="HF base model for sentiment adapter runtime."),
+    sentiment_adapter_path: Optional[Path] = typer.Option(None, "--sentiment-adapter-path", help="PEFT adapter path for Sentiment Analyst."),
+    sentiment_score_batch_size: Optional[int] = typer.Option(None, "--sentiment-score-batch-size", min=1, max=16, help="Forced-choice scoring batch size."),
     checkpoint: bool = typer.Option(False, "--checkpoint", help="Save resumable checkpoints after graph steps."),
     resume: Optional[str] = typer.Option(None, "--resume", help="Resume from checkpoint by run_id."),
     clear_checkpoints: bool = typer.Option(False, "--clear-checkpoints", help="Clear saved checkpoints before running."),
@@ -304,6 +321,10 @@ def report(
         fixture=fixture,
         llm_provider=llm_provider,
         model=model,
+        sentiment_provider=sentiment_provider,
+        sentiment_base_model=sentiment_base_model,
+        sentiment_adapter_path=sentiment_adapter_path,
+        sentiment_score_batch_size=sentiment_score_batch_size,
         checkpoint=checkpoint,
         resume=resume,
         clear_checkpoints=clear_checkpoints,
@@ -319,6 +340,10 @@ def run_report(
     fixture: str | None,
     llm_provider: str | LLMProviderOption,
     model: str | None,
+    sentiment_provider: str | SentimentProviderOption | None,
+    sentiment_base_model: str | None,
+    sentiment_adapter_path: Path | str | None,
+    sentiment_score_batch_size: int | None,
     checkpoint: bool,
     resume: str | None,
     clear_checkpoints: bool,
@@ -336,6 +361,10 @@ def run_report(
             fixture=fixture,
             llm_provider=llm_provider,
             model=model,
+            sentiment_provider=sentiment_provider,
+            sentiment_base_model=sentiment_base_model,
+            sentiment_adapter_path=sentiment_adapter_path,
+            sentiment_score_batch_size=sentiment_score_batch_size,
         )
     except ValueError as exc:
         _exit_with_error(str(exc))
@@ -376,6 +405,7 @@ def _run_workflow(request, checkpoint: bool, resume: str | None, clear_checkpoin
         console.print(f"[yellow]Cleared {cleared} checkpoint file(s).[/yellow]")
     if resume is None:
         _preflight_llm(request.llm_provider, request.model, bool(request.fixture), settings)
+        _preflight_sentiment_runtime(request, settings)
         _print_request_review(request, checkpoint=checkpoint, runs_dir=store.base_dir, mode="fixture" if request.fixture else "live")
 
     dashboard = CLIRunDashboard(request)
@@ -433,6 +463,10 @@ def batch(
             fixture=None,
             llm_provider=llm_provider,
             model=model,
+            sentiment_provider=None,
+            sentiment_base_model=None,
+            sentiment_adapter_path=None,
+            sentiment_score_batch_size=None,
             checkpoint=checkpoint,
             resume=None,
             clear_checkpoints=False,
@@ -621,6 +655,13 @@ def config_check() -> None:
     table.add_row("StockTwits", *_simple_http_status("https://api.stocktwits.com/api/2/streams/symbol/AAPL.json", "public stream reachable"))
     table.add_row("Reddit", *_simple_http_status("https://www.reddit.com/r/stocks/search.json?q=AAPL&restrict_sr=on&sort=new&t=week&limit=1", "public search reachable"))
     table.add_row("Jin10", "OK" if settings.jin10_api_url else "WARN", "JIN10_API_URL set" if settings.jin10_api_url else "JIN10_API_URL not set")
+    sentiment_detail = (
+        str(settings.sentiment_adapter_path)
+        if settings.sentiment_adapter_path
+        else "main LLM sentiment path; set IRD_SENTIMENT_PROVIDER=hf-peft to use adapter"
+    )
+    sentiment_status = "OK" if settings.sentiment_provider != "hf-peft" or (settings.sentiment_adapter_path and settings.sentiment_adapter_path.exists()) else "WARN"
+    table.add_row("Sentiment Runtime", sentiment_status, f"{settings.sentiment_provider}; {sentiment_detail}")
     console.print(table)
 
 
@@ -831,6 +872,9 @@ def _print_request_review(request, checkpoint: bool, runs_dir: Path, mode: str) 
     table.add_row("fixture", request.fixture or "")
     table.add_row("llm_provider", request.llm_provider)
     table.add_row("model", request.model or "")
+    table.add_row("sentiment_provider", request.sentiment_provider or "settings/default")
+    table.add_row("sentiment_base_model", request.sentiment_base_model or "settings/default")
+    table.add_row("sentiment_adapter_path", request.sentiment_adapter_path or "settings/default")
     table.add_row("checkpoint", str(checkpoint))
     table.add_row("runs_dir", str(runs_dir))
     console.print(table)
@@ -1113,6 +1157,29 @@ def _preflight_llm(provider: str, model: str | None, fixture_mode: bool, setting
                 f"Pull/list the target model with `ollama pull {model or settings.ollama_model}` and `ollama list`.",
                 "Set IRD_OLLAMA_BASE_URL=http://localhost:11434/v1 in .env if you changed the endpoint.",
             ],
+        )
+
+
+def _preflight_sentiment_runtime(request, settings) -> None:
+    configured_provider = "main" if request.llm_provider == "fake" and request.sentiment_provider is None else settings.sentiment_provider
+    provider = (request.sentiment_provider or configured_provider or "main").strip().lower()
+    if provider in {"", "main", "none", "disabled", "fake"}:
+        return
+    if provider != "hf-peft":
+        _exit_with_error(f"Unsupported sentiment provider: {provider}")
+    adapter_path = Path(request.sentiment_adapter_path) if request.sentiment_adapter_path else settings.sentiment_adapter_path
+    if adapter_path is None:
+        _exit_with_error(
+            "Sentiment adapter is enabled but no adapter path was provided.",
+            hints=[
+                "Set IRD_SENTIMENT_ADAPTER_PATH in .env.",
+                "Or pass --sentiment-adapter-path models/investment-research-desk-lora-sentiment/<timestamp>/adapter.",
+            ],
+        )
+    if not adapter_path.exists():
+        _exit_with_error(
+            "Sentiment adapter path does not exist.",
+            hints=[str(adapter_path), "Run `ird lora train ...` first or point to an existing PEFT adapter directory."],
         )
 
 

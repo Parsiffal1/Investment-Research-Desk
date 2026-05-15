@@ -3,6 +3,8 @@ from pathlib import Path
 
 from investment_research_desk.lora import LoraTrainingConfig, prepare_lora_data, train_lora_sentiment
 from investment_research_desk.lora import sentiment
+from investment_research_desk.sentiment_runtime import FakeSentimentClassifier, aggregate_predictions
+from investment_research_desk.schemas import SentimentInput
 
 
 def test_lora_prepare_data_keeps_heldout_splits_out_of_train(tmp_path: Path, monkeypatch):
@@ -119,3 +121,17 @@ def test_lora_eval_markdown_contains_metrics():
     assert "Accuracy: 0.8100" in report
     assert "Baseline Macro-F1 delta: -0.0100" in report
     assert "| positive | 1.0000 | 1.0000 | 1.0000 |" in report
+
+
+def test_runtime_sentiment_classifier_aggregates_directional_labels():
+    inputs = [
+        SentimentInput(text="Desk sentiment is constructive and bullish.", source="test", timestamp=sentiment.datetime.now(sentiment.timezone.utc)),
+        SentimentInput(text="Risk is present but less important.", source="test", timestamp=sentiment.datetime.now(sentiment.timezone.utc)),
+    ]
+    predictions = FakeSentimentClassifier().classify(inputs)
+
+    result = aggregate_predictions(inputs, predictions)
+
+    assert result.sentiment_label == "mixed"
+    assert result.sentiment_score == 0.0
+    assert result.evidence[0].startswith("adapter_classification=")

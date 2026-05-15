@@ -26,6 +26,10 @@ class Settings:
     news_data_vendors: str = "jin10,finnhub,yahoo_finance"
     sentiment_data_vendors: str = "tavily,stocktwits,reddit"
     fundamental_data_vendors: str = "fmp,finnhub"
+    sentiment_provider: str = "main"
+    sentiment_base_model: str = "Qwen/Qwen3-8B"
+    sentiment_adapter_path: Path | None = None
+    sentiment_score_batch_size: int = 4
 
 
 def load_settings() -> Settings:
@@ -49,4 +53,8 @@ def load_settings() -> Settings:
         news_data_vendors=os.getenv("IRD_NEWS_DATA_VENDORS", "jin10,finnhub,yahoo_finance"),
         sentiment_data_vendors=os.getenv("IRD_SENTIMENT_DATA_VENDORS", "tavily,stocktwits,reddit"),
         fundamental_data_vendors=os.getenv("IRD_FUNDAMENTAL_DATA_VENDORS", "fmp,finnhub"),
+        sentiment_provider=os.getenv("IRD_SENTIMENT_PROVIDER", "main"),
+        sentiment_base_model=os.getenv("IRD_SENTIMENT_BASE_MODEL", "Qwen/Qwen3-8B"),
+        sentiment_adapter_path=Path(path) if (path := os.getenv("IRD_SENTIMENT_ADAPTER_PATH")) else None,
+        sentiment_score_batch_size=int(os.getenv("IRD_SENTIMENT_SCORE_BATCH_SIZE", "4")),
     )

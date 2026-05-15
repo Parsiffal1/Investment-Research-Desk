@@ -85,6 +85,23 @@ bash scripts/wsl/run_lora_pipeline.sh full
 
 LoRA evaluation uses forced-choice label scoring for Accuracy/Macro-F1 and a small generative JSON sample for output-contract checks. This keeps held-out evaluation practical while still checking that Qwen3 no-think JSON output does not emit `<think>` blocks or invalid labels.
 
+After a sentiment adapter is trained and evaluated, it can be enabled for the main research workflow. This adapter is used only by the Sentiment Analyst for directional sentiment classification; the main report/debate LLM remains controlled by `--llm-provider` and `--model`.
+
+```powershell
+uv run ird report --symbol ETH-USDT-SWAP --horizon short_term --llm-provider ollama `
+  --sentiment-provider hf-peft `
+  --sentiment-adapter-path models/investment-research-desk-lora-sentiment/<run>/adapter
+```
+
+Equivalent `.env` settings:
+
+```text
+IRD_SENTIMENT_PROVIDER=hf-peft
+IRD_SENTIMENT_BASE_MODEL=Qwen/Qwen3-8B
+IRD_SENTIMENT_ADAPTER_PATH=models/investment-research-desk-lora-sentiment/<run>/adapter
+IRD_SENTIMENT_SCORE_BATCH_SIZE=4
+```
+
 ## CLI
 
 - `ird` starts an interactive research flow.
@@ -168,7 +185,7 @@ The workflow enforces tool boundaries by having each analyst call only its allow
 
 - `Fundamental/Macro Analyst`: calls `get_fundamentals` and macro/news tools, then reads fundamental metadata, quote metadata, and macro/news context.
 - `News/Macro Impact Analyst`: first asks the LLM to generate an optimized query plan before any tool call is executed. The plan decides whether to call `get_news`, whether to call `get_global_news`, exact query wording, call count, and stop condition within a bounded budget. `get_news` routes through Jin10, Finnhub, Yahoo Finance, and Tavily fallback. If the model tries to finish without any direct instrument-specific `get_news` call, the workflow enforces one targeted search and asks the LLM to evaluate those candidates before final output. If the LLM output must fall back to deterministic recovery, candidate events are filtered by instrument relevance before entering admitted news impact.
-- `Sentiment Analyst`: calls `get_sentiment_inputs`, then reads sentiment inputs only.
+- `Sentiment Analyst`: calls `get_sentiment_inputs`, then reads sentiment inputs only. If `IRD_SENTIMENT_PROVIDER=hf-peft` or `--sentiment-provider hf-peft` is enabled, it loads the PEFT sentiment adapter and uses forced-choice label scoring over `bearish/bullish/neutral` as the classification authority before the main LLM summarizes evidence and caveats.
 - `Technical Analyst`: calls `get_market_data` and `get_swap_market_context`, calculates deterministic indicators in Python, then the LLM reads OHLCV, indicator results, and OKX public SWAP context.
 - `Bull/Bear Researchers`: analyst outputs only, no direct external provider calls.
 - `Research Reporter`: analyst/debate outputs and warnings only.
