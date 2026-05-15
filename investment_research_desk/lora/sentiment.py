@@ -77,22 +77,30 @@ def prepare_lora_data(
             examples = _load_examples(dataset_key, split_spec, dataset_dir, limit)
             raw_training_examples.extend(examples)
             raw_training_manifest.extend(suites._manifest_entries(dataset_key, split_spec, examples))
-        split_dev_examples = _dev_slice(raw_training_examples)
-        split_dev_row_ids = {id(item) for item in split_dev_examples}
-        split_train_examples = [item for item in raw_training_examples if id(item) not in split_dev_row_ids]
-        split_dev_manifest = raw_training_manifest[: len(split_dev_examples)]
-        split_train_manifest = raw_training_manifest[len(split_dev_examples) :]
+        eval_spec = {**spec, "split": spec["eval_split"]}
+        heldout_examples = _load_examples(dataset_key, eval_spec, dataset_dir, limit)
+        split_eval_manifest = suites._manifest_entries(dataset_key, eval_spec, heldout_examples)
+        filtered_training_pairs, removed_overlap_count = _exclude_eval_hash_overlaps(
+            list(zip(raw_training_examples, raw_training_manifest, strict=True)),
+            split_eval_manifest,
+        )
+        split_dev_pairs = _dev_pair_slice(filtered_training_pairs)
+        split_train_pairs = filtered_training_pairs[len(split_dev_pairs) :]
+        split_dev_examples = [example for example, _manifest in split_dev_pairs]
+        split_dev_manifest = [manifest for _example, manifest in split_dev_pairs]
+        split_train_examples = [example for example, _manifest in split_train_pairs]
+        split_train_manifest = [manifest for _example, manifest in split_train_pairs]
         train_examples.extend(_format_sft_examples(dataset_key, labels, split_train_examples))
         dev_examples.extend(_format_sft_examples(dataset_key, labels, split_dev_examples))
         train_manifest.extend(split_train_manifest)
         dev_manifest.extend(split_dev_manifest)
-        eval_spec = {**spec, "split": spec["eval_split"]}
-        heldout_examples = _load_examples(dataset_key, eval_spec, dataset_dir, limit)
         eval_examples.extend(_format_sft_examples(dataset_key, labels, heldout_examples))
-        eval_manifest.extend(suites._manifest_entries(dataset_key, eval_spec, heldout_examples))
+        eval_manifest.extend(split_eval_manifest)
         split_summary[dataset_key] = {
             "train_splits": spec["train_splits"],
             "eval_split": spec["eval_split"],
+            "raw_train_samples": len(raw_training_examples),
+            "removed_train_eval_hash_overlaps": removed_overlap_count,
             "train_samples": len(split_train_examples),
             "dev_samples": len(split_dev_examples),
             "eval_samples": len(heldout_examples),
@@ -337,11 +345,28 @@ def _chat_text(dataset_key: str, label_list: str, text: str, label: str) -> str:
     )
 
 
-def _dev_slice(examples: list[dict[str, Any]], size: int = 64) -> list[dict[str, Any]]:
-    if len(examples) <= 1:
+def _exclude_eval_hash_overlaps(
+    training_pairs: list[tuple[dict[str, Any], dict[str, Any]]],
+    eval_manifest: list[dict[str, Any]],
+) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], int]:
+    eval_text_hashes = {item["text_sha256"] for item in eval_manifest}
+    eval_norm_hashes = {item["normalized_text_sha256"] for item in eval_manifest}
+    filtered = [
+        (example, manifest)
+        for example, manifest in training_pairs
+        if manifest["text_sha256"] not in eval_text_hashes and manifest["normalized_text_sha256"] not in eval_norm_hashes
+    ]
+    return filtered, len(training_pairs) - len(filtered)
+
+
+def _dev_pair_slice(
+    pairs: list[tuple[dict[str, Any], dict[str, Any]]],
+    size: int = 64,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    if len(pairs) <= 1:
         return []
-    dev_size = min(size, max(1, len(examples) // 10), len(examples) - 1)
-    return examples[:dev_size]
+    dev_size = min(size, max(1, len(pairs) // 10), len(pairs) - 1)
+    return pairs[:dev_size]
 
 
 def _manifest_overlap(left: list[dict[str, Any]], right: list[dict[str, Any]]) -> dict[str, Any]:

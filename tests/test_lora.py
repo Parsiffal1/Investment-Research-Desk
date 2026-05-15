@@ -31,6 +31,31 @@ def test_lora_prepare_data_keeps_heldout_splits_out_of_train(tmp_path: Path, mon
     assert not any(row["dataset_key"] == "twitter_financial_news_sentiment" and row["split"] == "validation" for row in train_manifest)
 
 
+def test_lora_prepare_data_excludes_train_text_overlapping_eval(tmp_path: Path, monkeypatch):
+    def fake_load_examples(dataset_key, spec, dataset_dir, limit):
+        labels = spec["labels"]
+        if spec["split"] in {"test", "validation"} and dataset_key in {"financial_phrasebank", "twitter_financial_news_sentiment"}:
+            return [
+                {"row_idx": 100, "text": "Duplicate market headline.", "label": labels[0]},
+                {"row_idx": 101, "text": f"{dataset_key} eval unique", "label": labels[1]},
+            ]
+        return [
+            {"row_idx": 1, "text": "Duplicate market headline.", "label": labels[0]},
+            {"row_idx": 2, "text": f"{dataset_key} train unique", "label": labels[1]},
+            {"row_idx": 3, "text": f"{dataset_key} train unique two", "label": labels[2]},
+        ]
+
+    monkeypatch.setattr(sentiment, "_load_examples", fake_load_examples)
+
+    result = prepare_lora_data(tmp_path, dry_run=False)
+
+    assert result["leakage_check"]["status"] == "pass"
+    assert result["train_eval_overlap"]["normalized_text_hash_overlap_count"] == 0
+    assert result["datasets"]["financial_phrasebank"]["removed_train_eval_hash_overlaps"] > 0
+    train_rows = (tmp_path / "train.jsonl").read_text(encoding="utf-8")
+    assert "Duplicate market headline." not in train_rows
+
+
 def test_lora_sft_example_target_is_json_label_only():
     rows = sentiment._format_sft_examples(
         "financial_phrasebank",

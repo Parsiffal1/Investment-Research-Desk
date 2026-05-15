@@ -70,6 +70,18 @@ uv run ird lora eval --adapter-path models/investment-research-desk-lora-sentime
 
 Training is intended for a WSL2 CUDA environment with `torch`, `transformers`, `datasets`, `trl`, `peft`, `bitsandbytes`, and `accelerate` installed. The CLI writes PEFT adapter artifacts under `models/`, which is ignored by git. Data preparation writes `train/dev/eval` JSONL files and manifests with row and text hashes to prevent held-out leakage.
 
+WSL2 CUDA setup and execution scripts are documented in `docs/lora_training_wsl.md`:
+
+```powershell
+.\scripts\wsl\install_wsl_ubuntu_admin.ps1
+```
+
+```bash
+bash scripts/wsl/setup_lora_env.sh
+bash scripts/wsl/run_lora_pipeline.sh smoke
+bash scripts/wsl/run_lora_pipeline.sh full
+```
+
 ## CLI
 
 - `ird` starts an interactive research flow.
