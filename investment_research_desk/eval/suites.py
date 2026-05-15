@@ -250,6 +250,7 @@ def _sentiment_baseline_suite(
         "task": "financial_sentiment_three_class_classification",
         "model": model or settings.ollama_model,
         "llm_provider": llm_provider,
+        "inference_mode": "no_think",
         "limit_per_dataset": limit,
         "data_leakage_policy": (
             "This suite uses only held-out evaluation splits. LoRA/SFT data preparation must exclude these "
@@ -438,6 +439,7 @@ def _stratified_limit(examples: list[dict[str, str]], labels: list[str], limit: 
 def _predict_sentiment_label(llm, text: str, labels: list[str], dataset_name: str) -> str:
     label_list = ", ".join(labels)
     system = (
+        "/no_think\n"
         "You are a strict financial sentiment classifier. Return exactly one valid JSON object with one field: "
         f"{{\"label\":\"one of: {label_list}\"}}. Use only the allowed labels. Do not explain."
     )

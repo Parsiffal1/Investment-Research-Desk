@@ -29,8 +29,10 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
     class RuleLLM:
         provider = "fake"
         model = "rule"
+        calls: list[tuple[str, str]] = []
 
         def chat_json(self, system: str, user: str) -> dict:
+            self.calls.append((system, user))
             lowered = user.lower()
             if "bearish" in system and "downgraded" in lowered:
                 return {"label": "bearish"}
@@ -58,7 +60,8 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
             {"text": "$XYZ holds annual shareholder meeting", "label": "neutral"},
         ]
 
-    monkeypatch.setattr(suites, "make_llm_client", lambda *args, **kwargs: RuleLLM())
+    rule_llm = RuleLLM()
+    monkeypatch.setattr(suites, "make_llm_client", lambda *args, **kwargs: rule_llm)
     monkeypatch.setattr(suites, "_load_sentiment_dataset", fake_loader)
 
     result = run_eval_suite("sentiment-baseline", results_dir=tmp_path, llm_provider="fake", limit=3)
@@ -67,6 +70,9 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
     assert result["accuracy"] == 1.0
     assert result["macro_f1"] == 1.0
     assert result["metric_backend"] == "huggingface-evaluate"
+    assert result["inference_mode"] == "no_think"
+    assert rule_llm.calls
+    assert all("/no_think" in system for system, _ in rule_llm.calls)
     assert result["datasets"]["financial_phrasebank"]["split"] == "test"
     assert result["datasets"]["twitter_financial_news_sentiment"]["split"] == "validation"
     assert result["leakage_check"]["status"] == "not_checked_no_train_manifest"
