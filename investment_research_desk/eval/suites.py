@@ -1,21 +1,58 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+import httpx
+
 from investment_research_desk.config import Settings, load_settings
 from investment_research_desk.graph import ResearchWorkflow
+from investment_research_desk.llm import make_llm_client
 from investment_research_desk.providers.fixtures import FixtureProvider
 from investment_research_desk.schemas import FinalResearchContext, ResearchCase, RunRequest
 from investment_research_desk.tools.guardrails import find_guardrail_violations
 from investment_research_desk.tools.metrics import approximate_tokens, compression_ratio
 
-EvalSuite = Literal["schema", "guardrail", "single-vs-multi", "consistency", "compression", "latency", "lora"]
+EvalSuite = Literal["schema", "guardrail", "single-vs-multi", "consistency", "compression", "latency", "lora", "sentiment-baseline"]
+
+SENTIMENT_DATASETS = {
+    "financial_phrasebank": {
+        "dataset": "ArtGarfunkel/FinancialPhraseBank",
+        "config": "default",
+        "split": "test",
+        "text_field": "sentence",
+        "label_field": "sentiment",
+        "labels": ["negative", "neutral", "positive"],
+        "label_map": {},
+        "source_url": "https://huggingface.co/datasets/ArtGarfunkel/FinancialPhraseBank",
+        "leakage_policy": "held-out test split; do not use this split for LoRA training",
+    },
+    "twitter_financial_news_sentiment": {
+        "dataset": "zeroshot/twitter-financial-news-sentiment",
+        "config": "default",
+        "split": "validation",
+        "text_field": "text",
+        "label_field": "label",
+        "labels": ["bearish", "bullish", "neutral"],
+        "label_map": {0: "bearish", 1: "bullish", 2: "neutral"},
+        "source_url": "https://huggingface.co/datasets/zeroshot/twitter-financial-news-sentiment",
+        "leakage_policy": "held-out validation split; do not use this split for LoRA training",
+    },
+}
 
 
-def run_eval_suite(suite: EvalSuite, settings: Settings | None = None, results_dir: Path | None = None) -> dict[str, Any]:
+def run_eval_suite(
+    suite: EvalSuite,
+    settings: Settings | None = None,
+    results_dir: Path | None = None,
+    llm_provider: str = "ollama",
+    model: str | None = None,
+    limit: int | None = None,
+    dataset_dir: Path | None = None,
+) -> dict[str, Any]:
     settings = settings or load_settings()
     results_dir = results_dir or Path("eval/results")
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -33,9 +70,11 @@ def run_eval_suite(suite: EvalSuite, settings: Settings | None = None, results_d
         result = _single_vs_multi_suite(settings)
     elif suite == "lora":
         result = _lora_suite()
+    elif suite == "sentiment-baseline":
+        result = _sentiment_baseline_suite(settings, llm_provider=llm_provider, model=model, limit=limit, dataset_dir=dataset_dir)
     else:
         raise ValueError(f"Unsupported eval suite: {suite}")
-    _write_result(results_dir, suite, result)
+    result["artifacts"] = _write_result(results_dir, suite, result)
     return result
 
 
@@ -142,16 +181,203 @@ def _lora_suite() -> dict[str, Any]:
     }
 
 
-def _write_result(results_dir: Path, suite: str, result: dict[str, Any]) -> None:
+def _sentiment_baseline_suite(
+    settings: Settings,
+    llm_provider: str,
+    model: str | None,
+    limit: int | None,
+    dataset_dir: Path | None,
+) -> dict[str, Any]:
+    llm = make_llm_client(settings, llm_provider, model)
+    started = datetime.now(timezone.utc)
+    dataset_results: dict[str, Any] = {}
+    for dataset_key, spec in SENTIMENT_DATASETS.items():
+        examples = _load_sentiment_dataset(dataset_key, spec, dataset_dir=dataset_dir, limit=limit)
+        predictions = []
+        for index, item in enumerate(examples, start=1):
+            predicted = _predict_sentiment_label(
+                llm,
+                text=item["text"],
+                labels=spec["labels"],
+                dataset_name=dataset_key,
+            )
+            expected = item["label"]
+            predictions.append(
+                {
+                    "index": index,
+                    "expected": expected,
+                    "predicted": predicted,
+                    "correct": predicted == expected,
+                    "text": item["text"],
+                }
+            )
+        y_true = [item["expected"] for item in predictions]
+        y_pred = [item["predicted"] for item in predictions]
+        metrics = _classification_metrics(y_true, y_pred, labels=spec["labels"])
+        dataset_results[dataset_key] = {
+            "dataset": spec["dataset"],
+            "split": spec["split"],
+            "source_url": spec["source_url"],
+            "leakage_policy": spec["leakage_policy"],
+            "labels": spec["labels"],
+            "samples": len(predictions),
+            "accuracy": metrics["accuracy"],
+            "macro_f1": metrics["macro_f1"],
+            "per_class": metrics["per_class"],
+            "predictions": predictions,
+        }
+    completed = datetime.now(timezone.utc)
+    macro_f1_values = [item["macro_f1"] for item in dataset_results.values()]
+    accuracy_values = [item["accuracy"] for item in dataset_results.values()]
+    return {
+        "suite": "sentiment-baseline",
+        "status": "pass",
+        "task": "financial_sentiment_three_class_classification",
+        "model": model or settings.ollama_model,
+        "llm_provider": llm_provider,
+        "limit_per_dataset": limit,
+        "data_leakage_policy": (
+            "This suite uses only held-out evaluation splits. LoRA/SFT data preparation must exclude these "
+            "dataset+config+split pairs and should write train/eval manifests before training."
+        ),
+        "accuracy": sum(accuracy_values) / len(accuracy_values) if accuracy_values else 0.0,
+        "macro_f1": sum(macro_f1_values) / len(macro_f1_values) if macro_f1_values else 0.0,
+        "datasets": dataset_results,
+        "started_at": started.isoformat(),
+        "completed_at": completed.isoformat(),
+    }
+
+
+def _load_sentiment_dataset(dataset_key: str, spec: dict[str, Any], dataset_dir: Path | None, limit: int | None) -> list[dict[str, str]]:
+    cache_dir = dataset_dir or Path("eval/data")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{dataset_key}_{spec['split']}.jsonl"
+    if cache_path.exists():
+        rows = [json.loads(line) for line in cache_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    else:
+        rows = _fetch_hf_rows(spec)
+        cache_path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
+    examples = [_normalize_sentiment_row(row, spec) for row in rows]
+    examples = [item for item in examples if item["text"] and item["label"] in spec["labels"]]
+    if limit is not None and limit > 0:
+        return _stratified_limit(examples, spec["labels"], limit)
+    return examples
+
+
+def _fetch_hf_rows(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    page_size = 100
+    total: int | None = None
+    with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+        while total is None or offset < total:
+            params = {
+                "dataset": spec["dataset"],
+                "config": spec["config"],
+                "split": spec["split"],
+                "offset": offset,
+                "length": page_size,
+            }
+            response = _hf_rows_request_with_retry(client, params)
+            response.raise_for_status()
+            payload = response.json()
+            total = int(payload.get("num_rows_total") or 0)
+            page = [item.get("row") or {} for item in payload.get("rows") or []]
+            if not page:
+                break
+            rows.extend(page)
+            offset += len(page)
+    return rows
+
+
+def _hf_rows_request_with_retry(client: httpx.Client, params: dict[str, Any]) -> httpx.Response:
+    for attempt in range(4):
+        response = client.get("https://datasets-server.huggingface.co/rows", params=params)
+        if response.status_code != 429:
+            return response
+        if attempt < 3:
+            time.sleep(2**attempt)
+    return response
+
+
+def _normalize_sentiment_row(row: dict[str, Any], spec: dict[str, Any]) -> dict[str, str]:
+    raw_label = row.get(spec["label_field"])
+    label_map = spec.get("label_map") or {}
+    label = label_map.get(raw_label, raw_label)
+    return {"text": str(row.get(spec["text_field"]) or "").strip(), "label": str(label).strip().lower()}
+
+
+def _stratified_limit(examples: list[dict[str, str]], labels: list[str], limit: int) -> list[dict[str, str]]:
+    buckets = {label: [item for item in examples if item["label"] == label] for label in labels}
+    selected: list[dict[str, str]] = []
+    index = 0
+    while len(selected) < limit:
+        progressed = False
+        for label in labels:
+            bucket = buckets[label]
+            if index < len(bucket):
+                selected.append(bucket[index])
+                progressed = True
+                if len(selected) >= limit:
+                    break
+        if not progressed:
+            break
+        index += 1
+    return selected
+
+
+def _predict_sentiment_label(llm, text: str, labels: list[str], dataset_name: str) -> str:
+    label_list = ", ".join(labels)
+    system = (
+        "You are a strict financial sentiment classifier. Return exactly one valid JSON object with one field: "
+        f"{{\"label\":\"one of: {label_list}\"}}. Use only the allowed labels. Do not explain."
+    )
+    user = (
+        f"Dataset: {dataset_name}\n"
+        f"Allowed labels: {label_list}\n\n"
+        f"Financial text:\n{text}\n\n"
+        "Classify the sentiment."
+    )
+    try:
+        raw = llm.chat_json(system, user)
+    except Exception:
+        return labels[0]
+    label = str(raw.get("label") or "").strip().lower()
+    return label if label in labels else labels[0]
+
+
+def _classification_metrics(y_true: list[str], y_pred: list[str], labels: list[str]) -> dict[str, Any]:
+    total = len(y_true)
+    correct = sum(1 for expected, predicted in zip(y_true, y_pred) if expected == predicted)
+    per_class: dict[str, dict[str, float]] = {}
+    f1_values: list[float] = []
+    for label in labels:
+        tp = sum(1 for expected, predicted in zip(y_true, y_pred) if expected == label and predicted == label)
+        fp = sum(1 for expected, predicted in zip(y_true, y_pred) if expected != label and predicted == label)
+        fn = sum(1 for expected, predicted in zip(y_true, y_pred) if expected == label and predicted != label)
+        precision = tp / (tp + fp) if tp + fp else 0.0
+        recall = tp / (tp + fn) if tp + fn else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        per_class[label] = {"precision": precision, "recall": recall, "f1": f1, "support": float(sum(1 for item in y_true if item == label))}
+        f1_values.append(f1)
+    return {
+        "accuracy": correct / total if total else 0.0,
+        "macro_f1": sum(f1_values) / len(f1_values) if f1_values else 0.0,
+        "per_class": per_class,
+    }
+
+
+def _write_result(results_dir: Path, suite: str, result: dict[str, Any]) -> dict[str, str]:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     json_path = results_dir / f"{timestamp}_{suite}.json"
     md_path = results_dir / f"{timestamp}_{suite}.md"
     json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     lines = [f"# Eval Suite: {suite}", "", f"- Status: {result.get('status')}"]
     for key, value in result.items():
-        if key not in {"suite", "status"}:
+        if key not in {"suite", "status", "predictions"}:
             lines.append(f"- {key}: `{value}`")
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"json": str(json_path), "markdown": str(md_path)}
 
 
 def _single_agent_fixture_baseline(data) -> FinalResearchContext:

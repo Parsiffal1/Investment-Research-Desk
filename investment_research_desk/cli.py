@@ -460,9 +460,21 @@ def list_runs(
 
 @app.command(name="eval")
 def eval_command(
-    suite: str = typer.Option(..., "--suite", help="schema, guardrail, single-vs-multi, consistency, compression, latency, or lora."),
+    suite: str = typer.Option(..., "--suite", help="schema, guardrail, single-vs-multi, consistency, compression, latency, lora, or sentiment-baseline."),
+    llm_provider: LLMProviderOption = typer.Option(LLMProviderOption.ollama, "--llm-provider", help="Provider for model-based eval suites."),
+    model: Optional[str] = typer.Option(None, "--model", help="Override model for model-based eval suites."),
+    limit: Optional[int] = typer.Option(100, "--limit", help="Limit examples per sentiment dataset. Use 0 for the full held-out split."),
+    dataset_dir: Optional[Path] = typer.Option(None, "--dataset-dir", help="Directory for cached held-out sentiment datasets."),
+    results_dir: Optional[Path] = typer.Option(None, "--results-dir", help="Override eval results directory."),
 ) -> None:
-    result = run_eval_suite(suite)  # type: ignore[arg-type]
+    result = run_eval_suite(
+        suite,
+        llm_provider=llm_provider.value,
+        model=model,
+        limit=limit,
+        dataset_dir=dataset_dir,
+        results_dir=results_dir,
+    )  # type: ignore[arg-type]
     table = Table(title=f"Evaluation: {suite}")
     table.add_column("Metric")
     table.add_column("Value")
