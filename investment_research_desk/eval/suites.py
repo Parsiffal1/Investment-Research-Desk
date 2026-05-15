@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +54,7 @@ def run_eval_suite(
     model: str | None = None,
     limit: int | None = None,
     dataset_dir: Path | None = None,
+    train_manifest: Path | None = None,
 ) -> dict[str, Any]:
     settings = settings or load_settings()
     results_dir = results_dir or Path("eval/results")
@@ -71,7 +74,14 @@ def run_eval_suite(
     elif suite == "lora":
         result = _lora_suite()
     elif suite == "sentiment-baseline":
-        result = _sentiment_baseline_suite(settings, llm_provider=llm_provider, model=model, limit=limit, dataset_dir=dataset_dir)
+        result = _sentiment_baseline_suite(
+            settings,
+            llm_provider=llm_provider,
+            model=model,
+            limit=limit,
+            dataset_dir=dataset_dir,
+            train_manifest=train_manifest,
+        )
     else:
         raise ValueError(f"Unsupported eval suite: {suite}")
     result["artifacts"] = _write_result(results_dir, suite, result)
@@ -187,12 +197,15 @@ def _sentiment_baseline_suite(
     model: str | None,
     limit: int | None,
     dataset_dir: Path | None,
+    train_manifest: Path | None,
 ) -> dict[str, Any]:
     llm = make_llm_client(settings, llm_provider, model)
     started = datetime.now(timezone.utc)
     dataset_results: dict[str, Any] = {}
+    manifest_entries: list[dict[str, Any]] = []
     for dataset_key, spec in SENTIMENT_DATASETS.items():
         examples = _load_sentiment_dataset(dataset_key, spec, dataset_dir=dataset_dir, limit=limit)
+        manifest_entries.extend(_manifest_entries(dataset_key, spec, examples))
         predictions = []
         for index, item in enumerate(examples, start=1):
             predicted = _predict_sentiment_label(
@@ -229,9 +242,10 @@ def _sentiment_baseline_suite(
     completed = datetime.now(timezone.utc)
     macro_f1_values = [item["macro_f1"] for item in dataset_results.values()]
     accuracy_values = [item["accuracy"] for item in dataset_results.values()]
+    leakage_check = _leakage_check(manifest_entries, train_manifest)
     return {
         "suite": "sentiment-baseline",
-        "status": "pass",
+        "status": "pass" if leakage_check["status"] in {"pass", "not_checked_no_train_manifest"} else "fail",
         "task": "financial_sentiment_three_class_classification",
         "model": model or settings.ollama_model,
         "llm_provider": llm_provider,
@@ -240,11 +254,13 @@ def _sentiment_baseline_suite(
             "This suite uses only held-out evaluation splits. LoRA/SFT data preparation must exclude these "
             "dataset+config+split pairs and should write train/eval manifests before training."
         ),
+        "leakage_check": leakage_check,
         "accuracy": sum(accuracy_values) / len(accuracy_values) if accuracy_values else 0.0,
         "macro_f1": sum(macro_f1_values) / len(macro_f1_values) if macro_f1_values else 0.0,
         "datasets": dataset_results,
         "started_at": started.isoformat(),
         "completed_at": completed.isoformat(),
+        "_manifest_entries": manifest_entries,
     }
 
 
@@ -282,7 +298,10 @@ def _fetch_hf_rows(spec: dict[str, Any]) -> list[dict[str, Any]]:
             response.raise_for_status()
             payload = response.json()
             total = int(payload.get("num_rows_total") or 0)
-            page = [item.get("row") or {} for item in payload.get("rows") or []]
+            page = [
+                {"row_idx": item.get("row_idx"), "row": item.get("row") or {}}
+                for item in payload.get("rows") or []
+            ]
             if not page:
                 break
             rows.extend(page)
@@ -301,10 +320,98 @@ def _hf_rows_request_with_retry(client: httpx.Client, params: dict[str, Any]) ->
 
 
 def _normalize_sentiment_row(row: dict[str, Any], spec: dict[str, Any]) -> dict[str, str]:
-    raw_label = row.get(spec["label_field"])
+    raw_row = row.get("row") if isinstance(row.get("row"), dict) else row
+    raw_label = raw_row.get(spec["label_field"])
     label_map = spec.get("label_map") or {}
     label = label_map.get(raw_label, raw_label)
-    return {"text": str(row.get(spec["text_field"]) or "").strip(), "label": str(label).strip().lower()}
+    return {
+        "row_idx": row.get("row_idx"),
+        "text": str(raw_row.get(spec["text_field"]) or "").strip(),
+        "label": str(label).strip().lower(),
+    }
+
+
+def _manifest_entries(dataset_key: str, spec: dict[str, Any], examples: list[dict[str, str]]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for local_index, item in enumerate(examples):
+        text = item["text"]
+        entries.append(
+            {
+                "dataset_key": dataset_key,
+                "dataset": spec["dataset"],
+                "config": spec["config"],
+                "split": spec["split"],
+                "row_idx": item.get("row_idx"),
+                "local_index": local_index,
+                "label": item["label"],
+                "text_sha256": _sha256(text),
+                "normalized_text_sha256": _sha256(_normalize_text_for_hash(text)),
+                "source_url": spec["source_url"],
+            }
+        )
+    return entries
+
+
+def _leakage_check(eval_manifest: list[dict[str, Any]], train_manifest: Path | None) -> dict[str, Any]:
+    eval_split_keys = sorted({f"{item['dataset']}::{item['config']}::{item['split']}" for item in eval_manifest})
+    base = {
+        "heldout_eval_splits": eval_split_keys,
+        "train_exclusion_keys": eval_split_keys,
+        "eval_samples": len(eval_manifest),
+    }
+    if train_manifest is None:
+        return {
+            **base,
+            "status": "not_checked_no_train_manifest",
+            "message": "No train manifest was provided. Split-level held-out policy is recorded, but train/eval overlap was not checked.",
+        }
+    train_entries = _read_manifest(train_manifest)
+    eval_row_keys = {_row_key(item) for item in eval_manifest if item.get("row_idx") is not None}
+    train_row_keys = {_row_key(item) for item in train_entries if item.get("row_idx") is not None}
+    eval_text_hashes = {item["text_sha256"] for item in eval_manifest}
+    train_text_hashes = {item["text_sha256"] for item in train_entries if item.get("text_sha256")}
+    eval_norm_hashes = {item["normalized_text_sha256"] for item in eval_manifest}
+    train_norm_hashes = {item["normalized_text_sha256"] for item in train_entries if item.get("normalized_text_sha256")}
+    split_overlaps = sorted(
+        {
+            f"{item['dataset']}::{item['config']}::{item['split']}"
+            for item in train_entries
+            if f"{item.get('dataset')}::{item.get('config')}::{item.get('split')}" in eval_split_keys
+        }
+    )
+    row_overlaps = sorted(eval_row_keys & train_row_keys)
+    text_overlaps = sorted(eval_text_hashes & train_text_hashes)
+    normalized_text_overlaps = sorted(eval_norm_hashes & train_norm_hashes)
+    return {
+        **base,
+        "status": "fail" if split_overlaps or row_overlaps or text_overlaps or normalized_text_overlaps else "pass",
+        "train_manifest": str(train_manifest),
+        "train_samples": len(train_entries),
+        "split_overlaps": split_overlaps,
+        "row_overlaps": row_overlaps[:20],
+        "text_hash_overlap_count": len(text_overlaps),
+        "normalized_text_hash_overlap_count": len(normalized_text_overlaps),
+    }
+
+
+def _read_manifest(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _row_key(item: dict[str, Any]) -> str:
+    return f"{item.get('dataset')}::{item.get('config')}::{item.get('split')}::{item.get('row_idx')}"
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _normalize_text_for_hash(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"\$[a-z0-9._-]+", " $ticker ", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
 
 
 def _stratified_limit(examples: list[dict[str, str]], labels: list[str], limit: int) -> list[dict[str, str]]:
@@ -371,13 +478,22 @@ def _write_result(results_dir: Path, suite: str, result: dict[str, Any]) -> dict
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     json_path = results_dir / f"{timestamp}_{suite}.json"
     md_path = results_dir / f"{timestamp}_{suite}.md"
+    manifest_entries = result.pop("_manifest_entries", None)
+    artifacts = {"json": str(json_path), "markdown": str(md_path)}
+    if manifest_entries is not None:
+        manifest_path = results_dir / f"{timestamp}_{suite}_manifest.jsonl"
+        manifest_path.write_text(
+            "\n".join(json.dumps(item, ensure_ascii=False, default=str) for item in manifest_entries) + "\n",
+            encoding="utf-8",
+        )
+        artifacts["manifest"] = str(manifest_path)
     json_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     lines = [f"# Eval Suite: {suite}", "", f"- Status: {result.get('status')}"]
     for key, value in result.items():
-        if key not in {"suite", "status", "predictions"}:
+        if key not in {"suite", "status", "predictions", "_manifest_entries"}:
             lines.append(f"- {key}: `{value}`")
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return {"json": str(json_path), "markdown": str(md_path)}
+    return artifacts
 
 
 def _single_agent_fixture_baseline(data) -> FinalResearchContext:

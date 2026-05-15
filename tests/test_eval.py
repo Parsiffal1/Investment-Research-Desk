@@ -68,6 +68,8 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
     assert result["macro_f1"] == 1.0
     assert result["datasets"]["financial_phrasebank"]["split"] == "test"
     assert result["datasets"]["twitter_financial_news_sentiment"]["split"] == "validation"
+    assert result["leakage_check"]["status"] == "not_checked_no_train_manifest"
+    assert Path(result["artifacts"]["manifest"]).exists()
     assert list(tmp_path.glob("*_sentiment-baseline.json"))
 
 
@@ -82,3 +84,28 @@ def test_sentiment_limit_is_stratified():
     selected = suites._stratified_limit(examples, ["negative", "neutral", "positive"], 3)
 
     assert [item["label"] for item in selected] == ["negative", "neutral", "positive"]
+
+
+def test_leakage_check_detects_train_eval_overlap(tmp_path: Path):
+    eval_entries = [
+        {
+            "dataset": "dataset/a",
+            "config": "default",
+            "split": "test",
+            "row_idx": 1,
+            "text_sha256": "same",
+            "normalized_text_sha256": "same_norm",
+        }
+    ]
+    train_manifest = tmp_path / "train_manifest.jsonl"
+    train_manifest.write_text(
+        '{"dataset":"dataset/a","config":"default","split":"test","row_idx":1,"text_sha256":"same","normalized_text_sha256":"same_norm"}\n',
+        encoding="utf-8",
+    )
+
+    result = suites._leakage_check(eval_entries, train_manifest)
+
+    assert result["status"] == "fail"
+    assert result["split_overlaps"] == ["dataset/a::default::test"]
+    assert result["text_hash_overlap_count"] == 1
+    assert result["normalized_text_hash_overlap_count"] == 1

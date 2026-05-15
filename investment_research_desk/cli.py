@@ -465,6 +465,7 @@ def eval_command(
     model: Optional[str] = typer.Option(None, "--model", help="Override model for model-based eval suites."),
     limit: Optional[int] = typer.Option(100, "--limit", help="Limit examples per sentiment dataset. Use 0 for the full held-out split."),
     dataset_dir: Optional[Path] = typer.Option(None, "--dataset-dir", help="Directory for cached held-out sentiment datasets."),
+    train_manifest: Optional[Path] = typer.Option(None, "--train-manifest", help="Optional LoRA/SFT train manifest for leakage checks."),
     results_dir: Optional[Path] = typer.Option(None, "--results-dir", help="Override eval results directory."),
 ) -> None:
     result = run_eval_suite(
@@ -473,6 +474,7 @@ def eval_command(
         model=model,
         limit=limit,
         dataset_dir=dataset_dir,
+        train_manifest=train_manifest,
         results_dir=results_dir,
     )  # type: ignore[arg-type]
     table = Table(title=f"Evaluation: {suite}")
