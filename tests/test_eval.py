@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from investment_research_desk.config import load_settings
@@ -36,37 +35,29 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
 
         def chat_json_options(self, system: str, user: str, **kwargs) -> dict:
             if '"items"' in user:
+                import json
+
                 payload = json.loads(user)
                 return {
                     "predictions": [
-                        {"id": item["id"], "choice": self._choice(item["options"], self._label(system, item["text"]))}
+                        {"id": item["id"], "label": self._label(system, item["text"])}
                         for item in payload["items"]
                     ]
                 }
-
-            options_text = user.split("Options: ", 1)[1].split("\n", 1)[0]
-            options = json.loads(options_text)
-            return {"choice": self._choice(options, self._label(system, user))}
+            return {"label": self._label(system, user)}
 
         @staticmethod
         def _label(system: str, text: str) -> str:
             lowered = text.lower()
-            if "downgraded" in lowered:
+            if "bearish" in system and "downgraded" in lowered:
                 return "bearish"
-            if "beats estimates" in lowered:
+            if "bullish" in system and "beats estimates" in lowered:
                 return "bullish"
-            if "profit rose" in lowered:
+            if "positive" in system and "profit rose" in lowered:
                 return "positive"
-            if "loss widened" in lowered:
+            if "negative" in system and "loss widened" in lowered:
                 return "negative"
             return "neutral"
-
-        @staticmethod
-        def _choice(options: dict, label: str) -> str:
-            for choice, option_label in options.items():
-                if option_label == label:
-                    return choice
-            return "A"
 
         def healthcheck(self):
             return True, "ok"
@@ -95,9 +86,6 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
     assert result["batch_size"] == 3
     assert result["datasets"]["financial_phrasebank"]["split"] == "test"
     assert result["datasets"]["twitter_financial_news_sentiment"]["split"] == "validation"
-    first_prediction = result["datasets"]["financial_phrasebank"]["predictions"][0]
-    assert set(first_prediction["label_options"]) == {"A", "B", "C"}
-    assert first_prediction["predicted_choice"] in {"A", "B", "C"}
     assert result["leakage_check"]["status"] == "not_checked_no_train_manifest"
     assert Path(result["artifacts"]["manifest"]).exists()
     assert list(tmp_path.glob("*_sentiment-baseline.json"))
@@ -117,18 +105,9 @@ def test_sentiment_limit_is_stratified():
 
 
 def test_batch_prediction_parser_accepts_valid_labels_only():
-    raw = {"predictions": [{"id": 1, "choice": "B"}, {"id": 2, "choice": "D"}]}
+    raw = {"predictions": [{"id": 1, "label": "positive"}, {"id": 2, "label": "other"}]}
 
-    assert suites._parse_batch_predictions(raw, {"A", "B", "C"}) == {1: "B"}
-
-
-def test_stable_label_options_permute_labels_without_loss():
-    labels = ["negative", "neutral", "positive"]
-
-    options = suites._stable_label_options(labels, "sample-key")
-
-    assert set(options) == {"A", "B", "C"}
-    assert set(options.values()) == set(labels)
+    assert suites._parse_batch_predictions(raw, ["negative", "neutral", "positive"]) == {1: "positive"}
 
 
 def test_leakage_check_detects_train_eval_overlap(tmp_path: Path):
