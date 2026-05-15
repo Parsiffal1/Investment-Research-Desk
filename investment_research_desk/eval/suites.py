@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx
+import evaluate as hf_evaluate
 
 from investment_research_desk.config import Settings, load_settings
 from investment_research_desk.graph import ResearchWorkflow
@@ -254,6 +255,7 @@ def _sentiment_baseline_suite(
             "This suite uses only held-out evaluation splits. LoRA/SFT data preparation must exclude these "
             "dataset+config+split pairs and should write train/eval manifests before training."
         ),
+        "metric_backend": "huggingface-evaluate",
         "leakage_check": leakage_check,
         "accuracy": sum(accuracy_values) / len(accuracy_values) if accuracy_values else 0.0,
         "macro_f1": sum(macro_f1_values) / len(macro_f1_values) if macro_f1_values else 0.0,
@@ -454,22 +456,40 @@ def _predict_sentiment_label(llm, text: str, labels: list[str], dataset_name: st
 
 
 def _classification_metrics(y_true: list[str], y_pred: list[str], labels: list[str]) -> dict[str, Any]:
-    total = len(y_true)
-    correct = sum(1 for expected, predicted in zip(y_true, y_pred) if expected == predicted)
+    label_to_id = {label: index for index, label in enumerate(labels)}
+    references = [label_to_id[item] for item in y_true]
+    predictions = [label_to_id.get(item, -1) for item in y_pred]
+    label_ids = list(range(len(labels)))
+
+    accuracy_metric = hf_evaluate.load("accuracy")
+    f1_metric = hf_evaluate.load("f1")
+    precision_metric = hf_evaluate.load("precision")
+    recall_metric = hf_evaluate.load("recall")
+
+    accuracy = float(accuracy_metric.compute(predictions=predictions, references=references)["accuracy"]) if references else 0.0
+    macro_f1 = (
+        float(f1_metric.compute(predictions=predictions, references=references, average="macro", labels=label_ids)["f1"])
+        if references
+        else 0.0
+    )
+    precision_values = precision_metric.compute(
+        predictions=predictions, references=references, average=None, labels=label_ids, zero_division=0
+    )["precision"]
+    recall_values = recall_metric.compute(
+        predictions=predictions, references=references, average=None, labels=label_ids, zero_division=0
+    )["recall"]
+    f1_values = f1_metric.compute(predictions=predictions, references=references, average=None, labels=label_ids)["f1"]
     per_class: dict[str, dict[str, float]] = {}
-    f1_values: list[float] = []
-    for label in labels:
-        tp = sum(1 for expected, predicted in zip(y_true, y_pred) if expected == label and predicted == label)
-        fp = sum(1 for expected, predicted in zip(y_true, y_pred) if expected != label and predicted == label)
-        fn = sum(1 for expected, predicted in zip(y_true, y_pred) if expected == label and predicted != label)
-        precision = tp / (tp + fp) if tp + fp else 0.0
-        recall = tp / (tp + fn) if tp + fn else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-        per_class[label] = {"precision": precision, "recall": recall, "f1": f1, "support": float(sum(1 for item in y_true if item == label))}
-        f1_values.append(f1)
+    for label, label_id in label_to_id.items():
+        per_class[label] = {
+            "precision": float(precision_values[label_id]),
+            "recall": float(recall_values[label_id]),
+            "f1": float(f1_values[label_id]),
+            "support": float(sum(1 for item in references if item == label_id)),
+        }
     return {
-        "accuracy": correct / total if total else 0.0,
-        "macro_f1": sum(f1_values) / len(f1_values) if f1_values else 0.0,
+        "accuracy": accuracy,
+        "macro_f1": macro_f1,
         "per_class": per_class,
     }
 

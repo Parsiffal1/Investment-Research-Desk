@@ -66,6 +66,7 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
     assert result["status"] == "pass"
     assert result["accuracy"] == 1.0
     assert result["macro_f1"] == 1.0
+    assert result["metric_backend"] == "huggingface-evaluate"
     assert result["datasets"]["financial_phrasebank"]["split"] == "test"
     assert result["datasets"]["twitter_financial_news_sentiment"]["split"] == "validation"
     assert result["leakage_check"]["status"] == "not_checked_no_train_manifest"
