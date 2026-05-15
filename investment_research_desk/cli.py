@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from collections import deque
 from datetime import datetime
@@ -481,8 +482,50 @@ def eval_command(
     table.add_column("Metric")
     table.add_column("Value")
     for key, value in result.items():
-        table.add_row(str(key), str(value))
+        table.add_row(str(key), _format_eval_value(key, value))
     console.print(table)
+
+
+def _format_eval_value(key: str, value: Any) -> str:
+    if key == "datasets" and isinstance(value, dict):
+        lines = []
+        for name, dataset in value.items():
+            if not isinstance(dataset, dict):
+                continue
+            lines.append(
+                (
+                    f"{name}: samples={dataset.get('samples')}, "
+                    f"accuracy={_metric_float(dataset.get('accuracy'))}, "
+                    f"macro_f1={_metric_float(dataset.get('macro_f1'))}"
+                )
+            )
+        return "\n".join(lines)
+    if key == "leakage_check" and isinstance(value, dict):
+        return (
+            f"status={value.get('status')}, "
+            f"eval_samples={value.get('eval_samples')}, "
+            f"split_overlaps={len(value.get('split_overlaps') or [])}"
+        )
+    if key == "output_contract" and isinstance(value, dict):
+        violations = value.get("violations") if isinstance(value.get("violations"), dict) else {}
+        violation_text = ", ".join(f"{name}={count}" for name, count in violations.items())
+        return (
+            f"reasoning_effort={value.get('reasoning_effort')}, "
+            f"max_tokens={value.get('max_tokens')}, "
+            f"samples_checked={value.get('samples_checked')}, "
+            f"violations: {violation_text}"
+        )
+    if key == "artifacts" and isinstance(value, dict):
+        return "\n".join(f"{name}: {path}" for name, path in value.items())
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=True, default=str)
+    return str(value)
+
+
+def _metric_float(value: Any) -> str:
+    if isinstance(value, (float, int)):
+        return f"{value:.4f}"
+    return str(value)
 
 
 @config_app.command("check")

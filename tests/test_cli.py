@@ -1,6 +1,7 @@
 from typer.testing import CliRunner
 
 from investment_research_desk.cli import app
+from investment_research_desk.cli import _format_eval_value
 from investment_research_desk.cli_contract import build_run_request
 
 
@@ -112,3 +113,20 @@ def test_cli_eval_guardrail(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "guardrail" in result.output
+
+
+def test_eval_console_formatter_summarizes_large_dataset_payload():
+    value = {
+        "financial_phrasebank": {
+            "samples": 300,
+            "accuracy": 0.8066666666666666,
+            "macro_f1": 0.8243142589928828,
+            "predictions": [{"text": "non-ascii \u01c6 text"}],
+        }
+    }
+
+    formatted = _format_eval_value("datasets", value)
+
+    assert "financial_phrasebank: samples=300" in formatted
+    assert "0.8067" in formatted
+    assert "predictions" not in formatted
