@@ -25,6 +25,24 @@ def test_ollama_json_repair_path():
     assert client.chat_json("system", "user") == {"ok": True}
 
 
+def test_ollama_json_options_passes_reasoning_and_token_controls():
+    client = OllamaLLMClient("http://localhost:11434/v1", "qwen3:8b")
+    captured = {}
+
+    def fake_chat_message(messages, tools, response_format, **kwargs):
+        captured.update(kwargs)
+        return {"content": '{"ok": true}'}
+
+    client._chat_message = fake_chat_message  # type: ignore[method-assign]
+
+    assert client.chat_json_options("system", "user", temperature=0.0, max_tokens=24, reasoning_effort="none") == {
+        "ok": True
+    }
+    assert captured["temperature"] == 0.0
+    assert captured["max_tokens"] == 24
+    assert captured["reasoning_effort"] == "none"
+
+
 def test_analysis_and_research_agents_call_llm():
     data = FixtureProvider().load("gold_cpi")
     llm = FakeLLMClient()

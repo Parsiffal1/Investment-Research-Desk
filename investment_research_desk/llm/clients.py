@@ -16,6 +16,17 @@ class LLMClient(Protocol):
     def chat_json(self, system: str, user: str) -> dict:
         ...
 
+    def chat_json_options(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> dict:
+        ...
+
     def chat_tools_json(
         self,
         system: str,
@@ -48,6 +59,29 @@ class FakeLLMClient:
         if "news" in lowered or "impact" in lowered:
             return {"impact": "mixed", "summary": "Macro events create mixed market impact."}
         return {"summary": "Deterministic fixture-backed research output."}
+
+    def chat_json_options(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> dict:
+        return self.chat_json(system, user)
+
+    def chat_json_raw(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        parsed = self.chat_json(system, user)
+        return {"parsed": parsed, "raw": json.dumps(parsed), "reasoning": ""}
 
     def chat_tools_json(
         self,
@@ -89,6 +123,48 @@ class OllamaLLMClient:
             repair_system = "Return only one valid JSON object. Do not include markdown or commentary."
             repair_user = f"Repair this invalid JSON-like output into valid JSON:\n{content}"
             return _parse_json_object(self._chat_content(repair_system, repair_user))
+
+    def chat_json_options(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> dict:
+        content = self._chat_content(
+            system,
+            user,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+        return _parse_json_object(content)
+
+    def chat_json_raw(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> dict[str, Any]:
+        message = self._chat_message(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            tools=[],
+            response_format={"type": "json_object"},
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
+        )
+        content = message.get("content") or "{}"
+        reasoning = message.get("reasoning_content") or message.get("thinking") or ""
+        return {"parsed": _parse_json_object(content), "raw": content, "reasoning": reasoning}
 
     def chat_tools_json(
         self,
@@ -153,7 +229,15 @@ class OllamaLLMClient:
         parsed["_tool_calls"] = tool_calls_log
         return parsed
 
-    def _chat_content(self, system: str, user: str) -> str:
+    def _chat_content(
+        self,
+        system: str,
+        user: str,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
         return self._chat_message(
             [
                 {"role": "system", "content": system},
@@ -161,6 +245,9 @@ class OllamaLLMClient:
             ],
             tools=[],
             response_format={"type": "json_object"},
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
         )["content"]
 
     def _chat_message(
@@ -168,12 +255,21 @@ class OllamaLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         response_format: dict[str, str] | None,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         payload = {
             "model": self.model,
-            "temperature": 0.1,
+            "temperature": temperature,
             "messages": messages,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
+            payload["reasoning"] = {"effort": reasoning_effort}
         if response_format:
             payload["response_format"] = response_format
         if tools:

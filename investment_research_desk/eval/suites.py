@@ -20,6 +20,7 @@ from investment_research_desk.tools.guardrails import find_guardrail_violations
 from investment_research_desk.tools.metrics import approximate_tokens, compression_ratio
 
 EvalSuite = Literal["schema", "guardrail", "single-vs-multi", "consistency", "compression", "latency", "lora", "sentiment-baseline"]
+SENTIMENT_EVAL_MAX_TOKENS = 24
 
 SENTIMENT_DATASETS = {
     "financial_phrasebank": {
@@ -209,7 +210,7 @@ def _sentiment_baseline_suite(
         manifest_entries.extend(_manifest_entries(dataset_key, spec, examples))
         predictions = []
         for index, item in enumerate(examples, start=1):
-            predicted = _predict_sentiment_label(
+            predicted, output_violations = _predict_sentiment_label(
                 llm,
                 text=item["text"],
                 labels=spec["labels"],
@@ -223,6 +224,7 @@ def _sentiment_baseline_suite(
                     "predicted": predicted,
                     "correct": predicted == expected,
                     "text": item["text"],
+                    "output_violations": output_violations,
                 }
             )
         y_true = [item["expected"] for item in predictions]
@@ -244,6 +246,7 @@ def _sentiment_baseline_suite(
     macro_f1_values = [item["macro_f1"] for item in dataset_results.values()]
     accuracy_values = [item["accuracy"] for item in dataset_results.values()]
     leakage_check = _leakage_check(manifest_entries, train_manifest)
+    output_contract = _sentiment_output_contract(dataset_results)
     return {
         "suite": "sentiment-baseline",
         "status": "pass" if leakage_check["status"] in {"pass", "not_checked_no_train_manifest"} else "fail",
@@ -251,12 +254,14 @@ def _sentiment_baseline_suite(
         "model": model or settings.ollama_model,
         "llm_provider": llm_provider,
         "inference_mode": "no_think",
+        "max_tokens": SENTIMENT_EVAL_MAX_TOKENS,
         "limit_per_dataset": limit,
         "data_leakage_policy": (
             "This suite uses only held-out evaluation splits. LoRA/SFT data preparation must exclude these "
             "dataset+config+split pairs and should write train/eval manifests before training."
         ),
         "metric_backend": "huggingface-evaluate",
+        "output_contract": output_contract,
         "leakage_check": leakage_check,
         "accuracy": sum(accuracy_values) / len(accuracy_values) if accuracy_values else 0.0,
         "macro_f1": sum(macro_f1_values) / len(macro_f1_values) if macro_f1_values else 0.0,
@@ -436,25 +441,90 @@ def _stratified_limit(examples: list[dict[str, str]], labels: list[str], limit: 
     return selected
 
 
-def _predict_sentiment_label(llm, text: str, labels: list[str], dataset_name: str) -> str:
+def _predict_sentiment_label(llm, text: str, labels: list[str], dataset_name: str) -> tuple[str, list[str]]:
     label_list = ", ".join(labels)
     system = (
         "/no_think\n"
-        "You are a strict financial sentiment classifier. Return exactly one valid JSON object with one field: "
-        f"{{\"label\":\"one of: {label_list}\"}}. Use only the allowed labels. Do not explain."
+        f"JSON only. Choose one label: {label_list}. Schema: {{\"label\":\"<label>\"}}"
     )
     user = (
-        f"Dataset: {dataset_name}\n"
-        f"Allowed labels: {label_list}\n\n"
-        f"Financial text:\n{text}\n\n"
-        "Classify the sentiment."
+        f"dataset: {dataset_name}\n"
+        f"labels: {label_list}\n"
+        f"text: {text}"
     )
     try:
-        raw = llm.chat_json(system, user)
+        if hasattr(llm, "chat_json_raw"):
+            response = llm.chat_json_raw(
+                system,
+                user,
+                temperature=0.0,
+                max_tokens=SENTIMENT_EVAL_MAX_TOKENS,
+                reasoning_effort="none",
+            )
+            raw = response.get("parsed") or {}
+            raw_text = str(response.get("raw") or "")
+            reasoning = str(response.get("reasoning") or "")
+        elif hasattr(llm, "chat_json_options"):
+            raw = llm.chat_json_options(
+                system,
+                user,
+                temperature=0.0,
+                max_tokens=SENTIMENT_EVAL_MAX_TOKENS,
+                reasoning_effort="none",
+            )
+            raw_text = json.dumps(raw, ensure_ascii=False)
+            reasoning = ""
+        else:
+            raw = llm.chat_json(system, user)
+            raw_text = json.dumps(raw, ensure_ascii=False)
+            reasoning = ""
     except Exception:
-        return labels[0]
+        return labels[0], ["llm_call_failed"]
+    violations = _sentiment_output_violations(raw, raw_text, reasoning, labels)
     label = str(raw.get("label") or "").strip().lower()
-    return label if label in labels else labels[0]
+    if label not in labels:
+        return labels[0], violations
+    return label, violations
+
+
+def _sentiment_output_violations(raw: dict[str, Any], raw_text: str, reasoning: str, labels: list[str]) -> list[str]:
+    violations: list[str] = []
+    stripped = raw_text.strip()
+    lowered = stripped.lower()
+    if reasoning.strip() or "<think" in lowered or "</think" in lowered:
+        violations.append("thinking_output")
+    try:
+        json.loads(stripped)
+    except json.JSONDecodeError:
+        violations.append("non_json_wrapper")
+    if set(raw.keys()) - {"label"}:
+        violations.append("extra_json_fields")
+    if str(raw.get("label") or "").strip().lower() not in labels:
+        violations.append("invalid_label")
+    return violations
+
+
+def _sentiment_output_contract(dataset_results: dict[str, Any]) -> dict[str, Any]:
+    counts = {
+        "thinking_output": 0,
+        "non_json_wrapper": 0,
+        "extra_json_fields": 0,
+        "invalid_label": 0,
+        "llm_call_failed": 0,
+    }
+    total = 0
+    for dataset in dataset_results.values():
+        for prediction in dataset.get("predictions", []):
+            total += 1
+            for violation in prediction.get("output_violations", []):
+                counts[violation] = counts.get(violation, 0) + 1
+    return {
+        "reasoning_effort": "none",
+        "prompt_directive": "/no_think",
+        "max_tokens": SENTIMENT_EVAL_MAX_TOKENS,
+        "samples_checked": total,
+        "violations": counts,
+    }
 
 
 def _classification_metrics(y_true: list[str], y_pred: list[str], labels: list[str]) -> dict[str, Any]:

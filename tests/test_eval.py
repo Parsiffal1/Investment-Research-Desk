@@ -71,13 +71,30 @@ def test_sentiment_baseline_reports_accuracy_and_macro_f1(tmp_path: Path, monkey
     assert result["macro_f1"] == 1.0
     assert result["metric_backend"] == "huggingface-evaluate"
     assert result["inference_mode"] == "no_think"
+    assert result["max_tokens"] == suites.SENTIMENT_EVAL_MAX_TOKENS
+    assert result["output_contract"]["reasoning_effort"] == "none"
+    assert result["output_contract"]["violations"]["thinking_output"] == 0
     assert rule_llm.calls
     assert all("/no_think" in system for system, _ in rule_llm.calls)
+    assert all("Do not explain" not in system for system, _ in rule_llm.calls)
     assert result["datasets"]["financial_phrasebank"]["split"] == "test"
     assert result["datasets"]["twitter_financial_news_sentiment"]["split"] == "validation"
     assert result["leakage_check"]["status"] == "not_checked_no_train_manifest"
     assert Path(result["artifacts"]["manifest"]).exists()
     assert list(tmp_path.glob("*_sentiment-baseline.json"))
+
+
+def test_sentiment_output_contract_detects_explanatory_and_thinking_output():
+    violations = suites._sentiment_output_violations(
+        {"label": "positive", "why": "because earnings rose"},
+        '<think>hidden</think>\n{"label":"positive","why":"because earnings rose"}',
+        "",
+        ["negative", "neutral", "positive"],
+    )
+
+    assert "thinking_output" in violations
+    assert "non_json_wrapper" in violations
+    assert "extra_json_fields" in violations
 
 
 def test_sentiment_limit_is_stratified():
