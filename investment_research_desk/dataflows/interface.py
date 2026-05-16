@@ -62,7 +62,8 @@ def route_to_vendor(method: str, settings: Settings, request: RunRequest) -> Ven
         except Exception as exc:
             safe = _redact(str(exc), settings)
             status[vendor] = f"failed: {safe}"
-            warnings.append(f"{vendor} {method} failed: {safe}")
+            if not _is_free_tier_access_warning(safe):
+                warnings.append(f"{vendor} {method} failed: {safe}")
 
     return VendorRouteResult(data=combined, status=status, warnings=warnings)
 
@@ -172,3 +173,8 @@ def _redact(text: str, settings: Settings) -> str:
         text,
         [settings.fmp_api_key, settings.finnhub_api_key, settings.tavily_api_key, settings.jin10_api_key],
     )
+
+
+def _is_free_tier_access_warning(text: str) -> bool:
+    lowered = text.lower()
+    return "http 402" in lowered or "http 403" in lowered or "payment required" in lowered or "forbidden" in lowered

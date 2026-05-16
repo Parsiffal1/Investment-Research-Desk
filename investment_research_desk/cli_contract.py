@@ -113,6 +113,7 @@ def build_run_request(
     sentiment_base_model: str | None = None,
     sentiment_adapter_path: str | Path | None = None,
     sentiment_score_batch_size: int | None = None,
+    language: str = "en",
 ) -> RunRequest:
     provider = normalize_enum_value(llm_provider, ALLOWED_LLM_PROVIDERS, "llm_provider")
     depth = normalize_enum_value(research_depth, ALLOWED_RESEARCH_DEPTHS, "research_depth")
@@ -133,6 +134,7 @@ def build_run_request(
             request.sentiment_base_model = sentiment_base_model.strip() if sentiment_base_model and sentiment_base_model.strip() else None
             request.sentiment_adapter_path = normalized_adapter_path
             request.sentiment_score_batch_size = sentiment_score_batch_size
+            request.language = _normalize_language(language)  # type: ignore[assignment]
             return request
 
         normalized_symbol = (symbol or "").strip().upper()
@@ -156,6 +158,7 @@ def build_run_request(
             sentiment_base_model=sentiment_base_model.strip() if sentiment_base_model and sentiment_base_model.strip() else None,
             sentiment_adapter_path=normalized_adapter_path,
             sentiment_score_batch_size=sentiment_score_batch_size,
+            language=_normalize_language(language),  # type: ignore[arg-type]
         )
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
@@ -168,6 +171,13 @@ def infer_asset_class(symbol: str) -> str:
     if normalized in {"BTC", "ETH", "SOL", "XRP", "DOGE", "BNB", "ADA", "AVAX", "LINK", "LTC", "BCH"}:
         return AssetClassOption.crypto.value
     return AssetClassOption.equity.value
+
+
+def _normalize_language(language: str | None) -> str:
+    normalized = (language or "en").strip().lower()
+    if normalized not in {"en", "zh"}:
+        raise ValueError("language must be one of: en, zh")
+    return normalized
 
 
 def discover_fixtures(fixtures_dir: Path = Path("data/fixtures")) -> list[str]:

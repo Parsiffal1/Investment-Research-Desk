@@ -40,6 +40,7 @@ class RunRequest(BaseModel):
     sentiment_base_model: str | None = None
     sentiment_adapter_path: str | None = None
     sentiment_score_batch_size: int | None = Field(default=None, ge=1, le=16)
+    language: Literal["en", "zh"] = "en"
     tool_query: str | None = Field(default=None, exclude=True)
 
 
@@ -174,6 +175,7 @@ class AgentTrace(BaseModel):
     status: Literal["success", "warning", "failed", "skipped"]
     latency_sec: float
     warnings: list[str] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunTrace(BaseModel):
@@ -196,3 +198,4 @@ class RunMetrics(BaseModel):
     json_valid: bool = True
     schema_valid: bool = True
     guardrail_violations: list[str] = Field(default_factory=list)
+    runtime: dict[str, Any] = Field(default_factory=dict)

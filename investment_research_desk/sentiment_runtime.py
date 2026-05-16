@@ -10,6 +10,7 @@ from investment_research_desk.schemas import RunRequest, SentimentInput, Sentime
 
 RUNTIME_LABELS = ["bearish", "bullish", "neutral"]
 DEFAULT_SENTIMENT_BASE_MODEL = "Qwen/Qwen3-8B"
+DEFAULT_ADAPTER_ROOT = Path("models/investment-research-desk-lora-sentiment")
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,7 @@ class HfPeftSentimentClassifier:
         self.score_batch_size = max(1, score_batch_size)
         self._model: Any | None = None
         self._tokenizer: Any | None = None
+        self._load_latency_sec: float | None = None
 
     def classify(self, inputs: list[SentimentInput]) -> list[SentimentPrediction]:
         if not inputs:
@@ -101,6 +103,7 @@ class HfPeftSentimentClassifier:
             "labels": RUNTIME_LABELS,
             "method": "forced_choice_label_scoring",
             "score_batch_size": self.score_batch_size,
+            "load_latency_sec": self._load_latency_sec,
         }
 
     def _load(self) -> tuple[Any, Any]:
@@ -125,6 +128,9 @@ class HfPeftSentimentClassifier:
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
         quant_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16)
+        import time
+
+        started = time.perf_counter()
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             quantization_config=quant_config,
@@ -136,6 +142,7 @@ class HfPeftSentimentClassifier:
         self._model = model
         self._tokenizer = tokenizer
         self.base_model = base_model
+        self._load_latency_sec = round(time.perf_counter() - started, 3)
         return model, tokenizer
 
 
@@ -150,6 +157,8 @@ def make_sentiment_classifier(settings: Settings, request: RunRequest) -> Sentim
         raise RuntimeError(f"Unsupported sentiment provider: {provider}")
     adapter_path = Path(request.sentiment_adapter_path) if request.sentiment_adapter_path else settings.sentiment_adapter_path
     if adapter_path is None:
+        adapter_path = discover_latest_adapter()
+    if adapter_path is None:
         raise RuntimeError("IRD_SENTIMENT_ADAPTER_PATH or --sentiment-adapter-path is required for hf-peft sentiment.")
     missing = missing_runtime_packages()
     if missing:
@@ -157,6 +166,15 @@ def make_sentiment_classifier(settings: Settings, request: RunRequest) -> Sentim
     base_model = request.sentiment_base_model or settings.sentiment_base_model or DEFAULT_SENTIMENT_BASE_MODEL
     batch_size = request.sentiment_score_batch_size or settings.sentiment_score_batch_size
     return HfPeftSentimentClassifier(base_model=base_model, adapter_path=adapter_path, score_batch_size=batch_size)
+
+
+def discover_latest_adapter(root: Path = DEFAULT_ADAPTER_ROOT) -> Path | None:
+    if not root.exists():
+        return None
+    candidates = [path for path in root.glob("*/adapter") if path.is_dir() and (path / "adapter_config.json").exists()]
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda path: path.parent.name, reverse=True)[0]
 
 
 def aggregate_predictions(inputs: list[SentimentInput], predictions: list[SentimentPrediction]) -> SentimentResult:

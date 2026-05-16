@@ -299,7 +299,7 @@ def make_llm_client(settings: Settings, provider: str, model: str | None = None,
     if provider == "fake":
         return FakeLLMClient()
     if provider in {"ollama", "auto"}:
-        ollama = OllamaLLMClient(settings.ollama_base_url, model or settings.ollama_model)
+        ollama = OllamaLLMClient(settings.ollama_base_url, model or settings.ollama_model, timeout=settings.llm_timeout_sec)
         ok, _ = ollama.healthcheck()
         if ok or provider == "ollama":
             return ollama

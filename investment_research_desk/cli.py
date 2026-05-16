@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import time
@@ -42,7 +42,7 @@ from investment_research_desk.lora import LoraTrainingConfig, eval_lora_sentimen
 from investment_research_desk.persistence import RunStore
 from investment_research_desk.providers.okx import OkxMarketDataProvider
 from investment_research_desk.schemas import FinalResearchContext
-from investment_research_desk.sentiment_runtime import missing_runtime_packages
+from investment_research_desk.sentiment_runtime import discover_latest_adapter, missing_runtime_packages
 
 console = Console()
 app = typer.Typer(
@@ -309,6 +309,7 @@ def report(
     sentiment_base_model: Optional[str] = typer.Option(None, "--sentiment-base-model", help="HF base model for sentiment adapter runtime."),
     sentiment_adapter_path: Optional[Path] = typer.Option(None, "--sentiment-adapter-path", help="PEFT adapter path for Sentiment Analyst."),
     sentiment_score_batch_size: Optional[int] = typer.Option(None, "--sentiment-score-batch-size", min=1, max=16, help="Forced-choice scoring batch size."),
+    language: str = typer.Option("en", "--language", help="Report language: en or zh."),
     checkpoint: bool = typer.Option(False, "--checkpoint", help="Save resumable checkpoints after graph steps."),
     resume: Optional[str] = typer.Option(None, "--resume", help="Resume from checkpoint by run_id."),
     clear_checkpoints: bool = typer.Option(False, "--clear-checkpoints", help="Clear saved checkpoints before running."),
@@ -326,6 +327,7 @@ def report(
         sentiment_base_model=sentiment_base_model,
         sentiment_adapter_path=sentiment_adapter_path,
         sentiment_score_batch_size=sentiment_score_batch_size,
+        language=language,
         checkpoint=checkpoint,
         resume=resume,
         clear_checkpoints=clear_checkpoints,
@@ -349,6 +351,7 @@ def run_report(
     resume: str | None,
     clear_checkpoints: bool,
     runs_dir: Path | None,
+    language: str = "en",
 ) -> None:
     if resume:
         _run_resume(resume, checkpoint=checkpoint, clear_checkpoints=clear_checkpoints, runs_dir=runs_dir)
@@ -366,6 +369,7 @@ def run_report(
             sentiment_base_model=sentiment_base_model,
             sentiment_adapter_path=sentiment_adapter_path,
             sentiment_score_batch_size=sentiment_score_batch_size,
+            language=language,
         )
     except ValueError as exc:
         _exit_with_error(str(exc))
@@ -644,10 +648,13 @@ def config_check() -> None:
     table.add_column("Status")
     table.add_column("Detail")
 
-    ollama = OllamaLLMClient(settings.ollama_base_url, settings.ollama_model)
+    ollama = OllamaLLMClient(settings.ollama_base_url, settings.ollama_model, timeout=settings.llm_timeout_sec)
     ok, detail = ollama.healthcheck()
     table.add_row("Ollama", "OK" if ok else "WARN", detail)
     table.add_row("Model", settings.ollama_model, "Qwen3-8B Instruct/Chat target; override with IRD_OLLAMA_MODEL")
+    table.add_row("LLM Timeout", "OK", f"{settings.llm_timeout_sec}s; IRD_LLM_TIMEOUT_SEC")
+    table.add_row("Agent Execution", "OK", f"{settings.agent_execution_mode}; IRD_AGENT_EXECUTION_MODE=sequential|parallel")
+    table.add_row("Tool Loop Budget", "OK", f"timeout={settings.agent_tool_loop_timeout_sec}s; max_calls={settings.agent_max_tool_calls}")
     table.add_row("OKX", _http_status(f"{settings.okx_base_url}/api/v5/public/time"), settings.okx_base_url)
     table.add_row("Tavily", *_tavily_status(settings.tavily_base_url, settings.tavily_api_key))
     table.add_row("FMP", *_fmp_status(settings.fmp_base_url, settings.fmp_api_key))
@@ -656,13 +663,23 @@ def config_check() -> None:
     table.add_row("StockTwits", *_simple_http_status("https://api.stocktwits.com/api/2/streams/symbol/AAPL.json", "public stream reachable"))
     table.add_row("Reddit", *_simple_http_status("https://www.reddit.com/r/stocks/search.json?q=AAPL&restrict_sr=on&sort=new&t=week&limit=1", "public search reachable"))
     table.add_row("Jin10", "OK" if settings.jin10_api_url else "WARN", "JIN10_API_URL set" if settings.jin10_api_url else "JIN10_API_URL not set")
-    sentiment_detail = (
-        str(settings.sentiment_adapter_path)
-        if settings.sentiment_adapter_path
-        else "main LLM sentiment path; set IRD_SENTIMENT_PROVIDER=hf-peft to use adapter"
-    )
-    sentiment_status = "OK" if settings.sentiment_provider != "hf-peft" or (settings.sentiment_adapter_path and settings.sentiment_adapter_path.exists()) else "WARN"
-    table.add_row("Sentiment Runtime", sentiment_status, f"{settings.sentiment_provider}; {sentiment_detail}")
+    adapter_path = settings.sentiment_adapter_path or discover_latest_adapter()
+    missing = missing_runtime_packages()
+    if settings.sentiment_provider == "hf-peft":
+        if missing:
+            sentiment_status = "WARN"
+            sentiment_detail = f"hf-peft requested but missing packages: {', '.join(missing)}"
+        elif adapter_path and adapter_path.exists():
+            sentiment_status = "OK"
+            sentiment_detail = f"hf-peft adapter={adapter_path}"
+        else:
+            sentiment_status = "WARN"
+            sentiment_detail = "hf-peft requested but no adapter found; set IRD_SENTIMENT_ADAPTER_PATH"
+    else:
+        sentiment_status = "OK"
+        sentiment_detail = f"{settings.sentiment_provider}; latest adapter: {adapter_path or 'not found'}"
+    table.add_row("Sentiment Runtime", sentiment_status, sentiment_detail)
+    table.add_row("Report Language", "OK", settings.report_language)
     console.print(table)
 
 
@@ -1142,7 +1159,7 @@ def _clear_checkpoints(runs_dir: Path | None) -> None:
 def _preflight_llm(provider: str, model: str | None, fixture_mode: bool, settings) -> None:
     if provider == "fake":
         return
-    ollama = OllamaLLMClient(settings.ollama_base_url, model or settings.ollama_model)
+    ollama = OllamaLLMClient(settings.ollama_base_url, model or settings.ollama_model, timeout=settings.llm_timeout_sec)
     ok, detail = ollama.healthcheck()
     if ok:
         return
@@ -1170,11 +1187,14 @@ def _preflight_sentiment_runtime(request, settings) -> None:
         _exit_with_error(f"Unsupported sentiment provider: {provider}")
     adapter_path = Path(request.sentiment_adapter_path) if request.sentiment_adapter_path else settings.sentiment_adapter_path
     if adapter_path is None:
+        adapter_path = discover_latest_adapter()
+    if adapter_path is None:
         _exit_with_error(
-            "Sentiment adapter is enabled but no adapter path was provided.",
+            "Sentiment adapter is enabled but no adapter path was provided or discovered.",
             hints=[
                 "Set IRD_SENTIMENT_ADAPTER_PATH in .env.",
                 "Or pass --sentiment-adapter-path models/investment-research-desk-lora-sentiment/<timestamp>/adapter.",
+                "Or train an adapter under models/investment-research-desk-lora-sentiment/<timestamp>/adapter.",
             ],
         )
     if not adapter_path.exists():
@@ -1279,3 +1299,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

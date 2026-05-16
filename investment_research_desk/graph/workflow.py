@@ -153,6 +153,7 @@ class ResearchWorkflow:
                         "provider_mode": "live",
                         "tool_call_policy": "analyst_agents_call_allowed_tools",
                         "agent_tool_status": {},
+                        "language": request.language,
                     },
                 )
             s["data"] = data.model_dump(mode="json")
@@ -220,6 +221,7 @@ class ResearchWorkflow:
             s["sentiment"] = outputs["sentiment"]
             s["technical"] = outputs["technical"]
             data = self._merge_agent_data(request, seed_data, data_slices)
+            data.source_metadata["agent_execution_mode"] = self._analyst_execution_mode(request)
             s["data"] = data.model_dump(mode="json")
             self.store.write_json(s["run_id"], "normalized_data.json", data)
             tool_warnings = [
@@ -241,7 +243,7 @@ class ResearchWorkflow:
             analyst_team = {
                 "team": "Analyst Team",
                 "contract": get_agent_contract("analyst_team").model_dump(mode="json"),
-                "execution_mode": "parallel_thread_pool",
+                "execution_mode": "parallel_thread_pool" if self._analyst_execution_mode(request) == "parallel" else "sequential",
                 "symbol": data.symbol,
                 "asset_class": data.asset_class,
                 "horizon": data.horizon,
@@ -277,10 +279,31 @@ class ResearchWorkflow:
             "sentiment": lambda: self._run_sentiment_agent(request, data),
             "technical": lambda: self._run_technical_agent(request, data),
         }
+        mode = self._analyst_execution_mode(request)
         outputs: dict[str, dict[str, Any]] = {}
         data_slices: dict[str, dict[str, Any]] = {}
         traces: list[AgentTrace] = []
         warnings: list[str] = []
+        if mode == "sequential":
+            for name, call in jobs.items():
+                self._emit_progress("agent_status", name, "in_progress")
+                try:
+                    output, data_slice, trace = self._run_parallel_agent(name, call)
+                    outputs[name] = output
+                    data_slices[name] = data_slice
+                    traces.append(trace)
+                    self._emit_progress(
+                        "agent_result",
+                        name,
+                        "completed",
+                        payload={"output": output, "data": data_slice, "trace": trace.model_dump(mode="json")},
+                    )
+                except ParallelAgentError as exc:
+                    warnings.append(f"{name} failed in sequential analyst layer: {exc}")
+                    traces.append(exc.trace)
+                    self._emit_progress("agent_status", name, "failed", payload={"warnings": exc.trace.warnings})
+                    raise
+            return outputs, data_slices, traces, warnings
         with ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="ird-analyst") as executor:
             for name in jobs:
                 self._emit_progress("agent_status", name, "in_progress")
@@ -311,6 +334,16 @@ class ResearchWorkflow:
         order = ["fundamental_macro", "news_impact", "sentiment", "technical"]
         traces.sort(key=lambda trace: order.index(trace.name) if trace.name in order else len(order))
         return outputs, data_slices, traces, warnings
+
+    def _analyst_execution_mode(self, request: RunRequest) -> str:
+        configured = (self.settings.agent_execution_mode or "sequential").strip().lower()
+        if configured not in {"sequential", "parallel"}:
+            return "sequential"
+        if configured == "parallel":
+            return "parallel"
+        if request.fixture or request.llm_provider == "fake":
+            return "parallel"
+        return "sequential"
 
     @staticmethod
     def _run_parallel_agent(name: str, call) -> tuple[dict[str, Any], dict[str, Any], AgentTrace]:
@@ -408,19 +441,31 @@ class ResearchWorkflow:
             "tool_calls": [],
             "contract_floor_calls": [],
             "executed_tool_count": 0,
-            "max_tool_calls": max_rounds * max(1, len(tool_names)),
+            "max_tool_calls": max(1, min(self.settings.agent_max_tool_calls, max_rounds * max(1, len(tool_names)))),
             "executed_tool_counts": {},
+            "timeout": False,
+            "timeout_detail": None,
         }
 
         def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-            return self._execute_agent_tool(agent_name, request, name, arguments, collected)
+            payload = self._execute_agent_tool(agent_name, request, name, arguments, collected)
+            collected["tool_calls"].append({"name": name, "arguments": arguments, "result": payload})
+            return payload
 
         prompt = self._agent_tool_loop_prompt(agent_name, request, tool_names)
         try:
             raw = llm.chat_tools_json(contract.system_prompt, prompt, self._tool_specs(tool_names), execute_tool, max_rounds=max_rounds)
-            collected["tool_calls"].extend(raw.get("_tool_calls", []))
         except Exception as exc:
-            collected["warnings"].append(self._safe_warning(f"{agent_name} tool loop failed: {exc}"))
+            collected["timeout"] = _looks_like_timeout(exc)
+            collected["timeout_detail"] = self._safe_warning(str(exc))
+            retained = _retained_evidence_count(collected)
+            reason = "timed out" if collected["timeout"] else "failed"
+            collected["warnings"].append(
+                self._safe_warning(
+                    f"{agent_name} tool loop {reason}; retained_partial_evidence={retained}; "
+                    f"executed_tool_calls={collected['executed_tool_count']}; detail={exc}"
+                )
+            )
 
         called = {call.get("name") for call in collected["tool_calls"] if isinstance(call, dict)}
         for required in required_tools:
@@ -508,6 +553,9 @@ class ResearchWorkflow:
                 "max": collected["max_tool_calls"],
                 "per_tool": collected["executed_tool_counts"],
             },
+            "tool_loop_timeout": collected["timeout"],
+            "tool_loop_timeout_detail": collected["timeout_detail"],
+            "retained_partial_evidence": _retained_evidence_count(collected),
             **collected["source_metadata"],
         }
         return NormalizedData(
@@ -912,6 +960,13 @@ class ResearchWorkflow:
                 final_context_tokens=final_tokens,
                 compression_ratio=compression_ratio(raw_tokens, final_tokens),
                 guardrail_violations=violations,
+                runtime={
+                    "agent_execution_mode": NormalizedData.model_validate(s["data"]).source_metadata.get("agent_execution_mode"),
+                    "llm_timeout_sec": self.settings.llm_timeout_sec,
+                    "agent_tool_loop_timeout_sec": self.settings.agent_tool_loop_timeout_sec,
+                    "agent_max_tool_calls": self.settings.agent_max_tool_calls,
+                    "sentiment_runtime": NormalizedData.model_validate(s["data"]).source_metadata.get("sentiment_runtime"),
+                },
             )
             s["metrics"] = metrics.model_dump(mode="json")
             paths = dict(s.get("output_paths", {}))
@@ -1049,6 +1104,7 @@ class ResearchWorkflow:
         ).market_context
         source_metadata: dict[str, Any] = {
             "provider_mode": seed_data.source_metadata.get("provider_mode", "live"),
+            "agent_execution_mode": "parallel" if seed_data.source_metadata.get("provider_mode") == "fixture" else "tradingagents_configured",
             "tool_call_policy": (
                 "fixture_data_scoped_to_agent_contract"
                 if seed_data.source_metadata.get("provider_mode") == "fixture"
@@ -1397,7 +1453,22 @@ def _contains_financial_token(text: str, token: str) -> bool:
         return False
     if " " in normalized or "-" in normalized:
         return normalized in text
-    return re.search(rf"(?<![A-Z0-9]){re.escape(normalized)}(?![A-Z0-9])", text) is not None
+    return re.search(rf"(?<![A-Z0-9-]){re.escape(normalized)}(?![A-Z0-9-])", text) is not None
+
+
+def _looks_like_timeout(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return "timeout" in text or "timed out" in text or "readtimeout" in text
+
+
+def _retained_evidence_count(collected: dict[str, Any]) -> int:
+    return (
+        len(collected.get("ohlcv") or [])
+        + len(collected.get("news_events") or [])
+        + len(collected.get("sentiment_inputs") or [])
+        + len(collected.get("market_context") or {})
+        + len(collected.get("source_metadata") or {})
+    )
 
 
 def _dedupe_news_events(events: list[NewsEvent]) -> list[NewsEvent]:

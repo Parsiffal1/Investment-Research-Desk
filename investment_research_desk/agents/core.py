@@ -759,9 +759,11 @@ class ResearchReporter:
                 "bear_researcher": risk.model_dump(mode="json"),
                 "research_debate": research_debate,
                 "warnings": warnings,
+                "language": data.source_metadata.get("language", "en"),
                 "instruction": (
                     "Use the debate handoff and evidence-quality notes when assigning directional_view and risk_level. "
-                    "If direct evidence is thin or sentiment/news is noisy, explicitly discount confidence."
+                    "If direct evidence is thin or sentiment/news is noisy, explicitly discount confidence. "
+                    "If language is 'zh', write all human-readable summaries, rationale, cases, risks, and conditions in Chinese; keep schema keys unchanged."
                 ),
             },
             FinalResearchContext,
@@ -929,7 +931,7 @@ def _instrument_related_news_events(events: list[NewsEvent], request: RunRequest
                 event.url or "",
             ]
         ).upper()
-        if any(token in haystack for token in tokens):
+        if any(_contains_financial_token(haystack, token) for token in tokens):
             related.append(event)
     return related
 
@@ -961,7 +963,7 @@ def _filter_relevant_news_events(events: list[NewsEvent], request: RunRequest) -
 def _news_relevance(event: NewsEvent, request: RunRequest) -> tuple[str, str]:
     haystack = " ".join([event.title, event.summary or "", event.url or ""]).upper()
     tokens = _instrument_query_tokens(request)
-    if any(token in haystack for token in tokens):
+    if any(_contains_financial_token(haystack, token) for token in tokens):
         return "direct", "mentions the instrument, underlying asset, or known alias in title, summary, or URL"
     macro_terms = {
         "FED",
@@ -1010,6 +1012,15 @@ def _sentiment_source_blocks(inputs: list[SentimentInput]) -> dict[str, Any]:
             bucket = "other"
         blocks[bucket].append(item.model_dump(mode="json"))
     return {key: {"count": len(value), "items": value[:12]} for key, value in blocks.items()}
+
+
+def _contains_financial_token(text: str, token: str) -> bool:
+    normalized = token.upper().strip()
+    if not normalized:
+        return False
+    if " " in normalized or "-" in normalized:
+        return normalized in text
+    return re.search(rf"(?<![A-Z0-9-]){re.escape(normalized)}(?![A-Z0-9-])", text) is not None
 
 
 def _news_tool_specs() -> list[dict[str, Any]]:
@@ -1207,6 +1218,12 @@ def _report_source_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
         "minimum_targeted_search_enforced",
         "filtered_candidate_count",
         "tool_call_budget",
+        "tool_loop_timeout",
+        "tool_loop_timeout_detail",
+        "retained_partial_evidence",
+        "agent_execution_mode",
+        "sentiment_runtime",
+        "language",
     }
     safe = {key: value for key, value in metadata.items() if key in safe_keys}
     if "contract_floor_calls" in metadata:
