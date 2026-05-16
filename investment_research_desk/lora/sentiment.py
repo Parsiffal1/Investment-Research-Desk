@@ -11,14 +11,33 @@ from typing import Any
 from investment_research_desk.eval import suites
 
 
-BASELINE_METRICS = {
-    "accuracy": 0.7900227722635215,
-    "macro_f1": 0.7771392512613777,
-    "datasets": {
-        "financial_phrasebank": {"accuracy": 0.8078512396694215, "macro_f1": 0.805105716432507},
-        "twitter_financial_news_sentiment": {"accuracy": 0.7721943048576214, "macro_f1": 0.7491727860902486},
-    },
-}
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_BASELINE_RESULTS_PATH = REPO_ROOT / "eval" / "results" / "baseline_full" / "heldout_eval_results.json"
+
+
+def load_baseline_metrics(path: Path | None = None) -> dict[str, Any]:
+    baseline_path = path or DEFAULT_BASELINE_RESULTS_PATH
+    if not baseline_path.exists():
+        raise FileNotFoundError(
+            f"Baseline held-out evaluation artifact not found: {baseline_path}. "
+            "Run or restore the baseline evaluation before computing LoRA deltas."
+        )
+    result = json.loads(baseline_path.read_text(encoding="utf-8"))
+    datasets = {
+        name: {
+            "accuracy": dataset_result["accuracy"],
+            "macro_f1": dataset_result["macro_f1"],
+            "samples": dataset_result.get("samples"),
+            "split": dataset_result.get("split"),
+        }
+        for name, dataset_result in result.get("datasets", {}).items()
+    }
+    return {
+        "source": str(baseline_path.relative_to(REPO_ROOT) if baseline_path.is_relative_to(REPO_ROOT) else baseline_path),
+        "accuracy": result["accuracy"],
+        "macro_f1": result["macro_f1"],
+        "datasets": datasets,
+    }
 
 LORA_DATASETS = {
     "financial_phrasebank": {
@@ -235,7 +254,7 @@ def eval_lora_sentiment(
             "contract_limit": contract_limit,
             "score_batch_size": score_batch_size,
             "eval_method": "forced_choice_label_scoring",
-            "baseline": BASELINE_METRICS,
+            "baseline": load_baseline_metrics(),
         }
     _require_eval_packages()
     from peft import PeftModel
@@ -257,6 +276,7 @@ def eval_lora_sentiment(
     model.eval()
     dataset_results: dict[str, Any] = {}
     contract_results: dict[str, Any] = {}
+    baseline_metrics = load_baseline_metrics()
     for dataset_key, spec in LORA_DATASETS.items():
         eval_spec = {**spec, "split": spec["eval_split"]}
         examples = _load_examples(dataset_key, eval_spec, dataset_dir, limit)
@@ -323,7 +343,7 @@ def eval_lora_sentiment(
         "contract_check_method": "generative_json_sample",
         "contract_limit_per_dataset": max(contract_limit, 0),
         "score_batch_size": score_batch_size,
-        "baseline": BASELINE_METRICS,
+        "baseline": baseline_metrics,
         "accuracy": sum(accuracy_values) / len(accuracy_values) if accuracy_values else 0.0,
         "macro_f1": sum(macro_values) / len(macro_values) if macro_values else 0.0,
         "baseline_delta": {},
@@ -332,8 +352,8 @@ def eval_lora_sentiment(
         "contract_samples": contract_results,
     }
     result["baseline_delta"] = {
-        "accuracy": result["accuracy"] - BASELINE_METRICS["accuracy"],
-        "macro_f1": result["macro_f1"] - BASELINE_METRICS["macro_f1"],
+        "accuracy": result["accuracy"] - baseline_metrics["accuracy"],
+        "macro_f1": result["macro_f1"] - baseline_metrics["macro_f1"],
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_json(output_dir / "heldout_eval_results.json", result)

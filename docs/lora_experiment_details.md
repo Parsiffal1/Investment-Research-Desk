@@ -119,6 +119,11 @@ Overall held-out result:
 | QLoRA adapter | 0.8926 | 0.8760 |
 | Delta | +0.1026 | +0.0989 |
 
+Baseline source:
+
+- `eval/results/baseline_full/heldout_eval_results.json`
+- `eval/results/baseline_full/heldout_eval_results.md`
+
 Output contract:
 
 | Check | Result |

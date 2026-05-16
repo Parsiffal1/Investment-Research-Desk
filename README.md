@@ -61,14 +61,15 @@ The optional LoRA path is designed for **WSL2 + CUDA** and adds a reproducible a
 
 ### Baseline vs. fine-tuned evaluation
 
-The repository currently hardcodes the baseline metrics in `investment_research_desk/lora/sentiment.py`, and the fine-tuned row is tracked in `eval/results/lora_full/heldout_eval_results.json`.
+The baseline and fine-tuned rows are both backed by checked-in full held-out evaluation artifacts.
 
 | Variant | ACC | Macro-F1 | Source |
 | --- | ---: | ---: | --- |
-| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
+| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `eval/results/baseline_full/heldout_eval_results.json` |
 | Fine-tuned adapter | 0.8926 | 0.8760 | `eval/results/lora_full/heldout_eval_results.json` |
 
 That is a held-out gain of **+0.1026 ACC** and **+0.0989 Macro-F1** over the checked-in baseline.
+If you rerun the baseline or fine-tuned evaluation, update this table from the corresponding `accuracy` and `macro_f1` fields in those artifacts.
 
 Setup and smoke test:
 

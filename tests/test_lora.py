@@ -87,6 +87,33 @@ def test_lora_eval_dry_run_reports_forced_choice_method(tmp_path: Path):
     assert result["score_batch_size"] == 3
 
 
+def test_lora_loads_baseline_metrics_from_artifact(tmp_path: Path):
+    artifact = tmp_path / "baseline.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "accuracy": 0.7,
+                "macro_f1": 0.6,
+                "datasets": {
+                    "example": {
+                        "split": "test",
+                        "samples": 3,
+                        "accuracy": 0.8,
+                        "macro_f1": 0.75,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = sentiment.load_baseline_metrics(artifact)
+
+    assert result["accuracy"] == 0.7
+    assert result["macro_f1"] == 0.6
+    assert result["datasets"]["example"]["samples"] == 3
+
+
 def test_lora_training_config_serializes_for_dry_run(tmp_path: Path):
     config = LoraTrainingConfig()
 
