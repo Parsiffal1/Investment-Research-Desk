@@ -12,7 +12,7 @@ def test_root_readme_pair_has_language_switch_and_navigation():
     en = _read(REPO_ROOT / "README.md")
     zh = _read(REPO_ROOT / "README.zh.md")
     switch = "[English](README.md) | [中文](README.zh.md)"
-    hero = "docs/assets/investment-research-desk-hero-v4.gif"
+    hero = "docs/assets/investment-research-desk-hero-v5.gif"
     huashu = "https://github.com/alchaincyf/huashu-design/tree/master"
     assert switch in en
     assert switch in zh
@@ -55,6 +55,9 @@ def test_hero_assets_exist():
     assert (DOCS_ROOT / "assets" / "investment-research-desk-hero-v4-script.md").exists()
     assert (DOCS_ROOT / "assets" / "investment-research-desk-hero-v4.html").exists()
     assert (DOCS_ROOT / "assets" / "investment-research-desk-hero-v4.gif").exists()
+    assert (DOCS_ROOT / "assets" / "investment-research-desk-hero-v5-script.md").exists()
+    assert (DOCS_ROOT / "assets" / "investment-research-desk-hero-v5.html").exists()
+    assert (DOCS_ROOT / "assets" / "investment-research-desk-hero-v5.gif").exists()
     assert (REPO_ROOT / "scripts" / "render_true30_gif.cjs").exists()
 
 
