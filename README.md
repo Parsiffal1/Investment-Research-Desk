@@ -22,6 +22,20 @@ This project does not place orders, manage accounts, read balances, manage posit
 - Optional Qwen3 sentiment LoRA adapter through Hugging Face PEFT.
 - English and Chinese report modes.
 
+## Screenshots
+
+### Interactive CLI Workflow
+
+![Interactive CLI workflow](docs/assets/screenshots/cli-interactive-menu.png)
+
+### Live Multi-Agent Progress
+
+![Live multi-agent progress](docs/assets/screenshots/cli-live-progress.png)
+
+### Final Research Context Report
+
+![Final research context report](docs/assets/screenshots/cli-final-report.png)
+
 ## Quick Start
 
 ```powershell
