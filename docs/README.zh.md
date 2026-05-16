@@ -27,6 +27,9 @@
 - [`lora_training_wsl.md`](lora_training_wsl.md)
   - WSL2 + CUDA 训练流程
   - 包括数据源、split hygiene、产物结构和发布边界
+- [`lora_experiment_details.md`](lora_experiment_details.md)
+  - 完整 benchmark 实验记录
+  - 包括硬件、运行时、held-out 指标和产物映射
 
 ## 这些文档之间是什么关系
 

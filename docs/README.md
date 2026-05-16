@@ -27,6 +27,9 @@ If you arrived here from the repository homepage, this page is the fastest way t
 - [`lora_training_wsl.md`](lora_training_wsl.md)
   - WSL2 + CUDA training workflow
   - Data sources, split hygiene, artifact structure, and release boundaries
+- [`lora_experiment_details.md`](lora_experiment_details.md)
+  - Full benchmark-backed experiment record
+  - Hardware, runtime, held-out metrics, and artifact map
 
 ## How these docs fit together
 

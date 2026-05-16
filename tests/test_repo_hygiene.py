@@ -40,12 +40,14 @@ def test_docs_index_pair_exists_and_links_to_core_docs():
         "windows_cli_guide.md",
         "wsl_lora_adapter_guide.md",
         "lora_training_wsl.md",
+        "lora_experiment_details.md",
     ]:
         assert rel in en
         assert rel in zh
 
 
 def test_hero_assets_exist():
+    assert (DOCS_ROOT / "lora_experiment_details.md").exists()
     assert (DOCS_ROOT / "assets" / "investment-research-desk-hero.html").exists()
     assert (DOCS_ROOT / "assets" / "investment-research-desk-hero.gif").exists()
     assert (DOCS_ROOT / "assets" / "investment-research-desk-hero-v2.html").exists()

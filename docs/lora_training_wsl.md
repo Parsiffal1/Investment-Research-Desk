@@ -82,6 +82,7 @@ The canonical result artifacts are:
 
 - `eval/results/lora_full/heldout_eval_results.json`
 - `eval/results/lora_full/heldout_eval_results.md`
+- [`lora_experiment_details.md`](lora_experiment_details.md) — the full experiment record for public benchmark backing
 
 ## Publishing
 

@@ -93,6 +93,7 @@ bash scripts/wsl/run_adapter_report.sh ETH-USDT-SWAP
 Read more in:
 - [`docs/wsl_lora_adapter_guide.md`](docs/wsl_lora_adapter_guide.md)
 - [`docs/lora_training_wsl.md`](docs/lora_training_wsl.md)
+- [`docs/lora_experiment_details.md`](docs/lora_experiment_details.md)
 
 ## What it looks like
 
