@@ -1458,12 +1458,31 @@ def _filter_relevant_sentiment_inputs(inputs: list[SentimentInput], request: Run
 
 def _sentiment_input_is_relevant(item: SentimentInput, request: RunRequest) -> bool:
     haystack = " ".join([item.text, item.url or "", item.source]).upper()
+    if _is_promotional_crypto_text(haystack):
+        return False
     tokens = _workflow_instrument_query_tokens(request)
     if any(_contains_financial_token(haystack, token) for token in tokens):
         return True
     if request.asset_class == "crypto" and any(term in haystack for term in {"CRYPTO", "BLOCKCHAIN", "DEFI", "STAKING", "ETF"}):
         return any(term in haystack for term in {"ETHEREUM", "BITCOIN", "SOLANA", "BTC", "ETH", "SOL", "ALTCOIN"})
     return False
+
+
+def _is_promotional_crypto_text(text: str) -> bool:
+    promo_terms = {
+        "PRESALE",
+        "PEPETO",
+        "NEXT 100X",
+        "100X",
+        "MILLIONAIRES",
+        "PRICE PREDICTION",
+        "BUY BEFORE",
+        "LISTING CLOSES",
+        "NEW CRYPTO",
+        "TOKEN SALE",
+        "AIRDROP",
+    }
+    return any(term in text for term in promo_terms)
 
 
 def _workflow_instrument_query_tokens(request: RunRequest) -> list[str]:
@@ -1475,6 +1494,12 @@ def _workflow_instrument_query_tokens(request: RunRequest) -> list[str]:
         "BTC": "BITCOIN",
         "ETH": "ETHEREUM",
         "SOL": "SOLANA",
+        "SPY": "SPDR S&P 500 ETF TRUST",
+        "QQQ": "INVESCO QQQ TRUST",
+        "DIA": "SPDR DOW JONES INDUSTRIAL AVERAGE ETF",
+        "IWM": "ISHARES RUSSELL 2000 ETF",
+        "GLD": "SPDR GOLD SHARES",
+        "SLV": "ISHARES SILVER TRUST",
         "XAU": "GOLD",
         "GC": "GOLD",
         "NVDA": "NVIDIA",
@@ -1492,6 +1517,10 @@ def _workflow_instrument_query_tokens(request: RunRequest) -> list[str]:
         alias = aliases.get(part)
         if alias:
             tokens.append(alias)
+            if "S&P 500" in alias:
+                tokens.append("S&P 500")
+            if "NASDAQ 100" in alias:
+                tokens.append("NASDAQ 100")
     return list(dict.fromkeys(tokens))
 
 

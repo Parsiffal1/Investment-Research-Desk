@@ -5,6 +5,7 @@ from investment_research_desk.config import load_settings
 from investment_research_desk.dataflows.interface import VendorRouteResult
 from investment_research_desk.graph import ResearchWorkflow
 from investment_research_desk.graph import workflow
+from investment_research_desk.agents import core as agent_core
 from investment_research_desk.sentiment_runtime import FakeSentimentClassifier
 from investment_research_desk.schemas import FinalResearchContext, NewsEvent, OHLCVBar, RunRequest, SentimentInput
 
@@ -230,6 +231,8 @@ def test_news_tool_call_preserves_symbol_and_passes_refined_query(tmp_path: Path
         "executed_tool_count": 0,
         "max_tool_calls": 4,
         "executed_tool_counts": {},
+        "timeout": False,
+        "timeout_detail": None,
     }
 
     workflow._execute_agent_tool(
@@ -277,3 +280,61 @@ def test_default_news_tool_arguments_expand_ambiguous_spy_query():
     assert args["symbol"] == "SPY"
     assert "SPDR S&P 500 ETF Trust" in args["query"]
     assert args["query"] != "SPY"
+
+
+def test_news_relevance_rejects_spy_military_false_positive():
+    military_event = NewsEvent(
+        title="Raytheon awarded contract for SPY-6 family of radars",
+        summary="U.S. Navy radar program update",
+        source="test",
+        published_at=datetime.now(timezone.utc),
+    )
+    market_event = NewsEvent(
+        title="SPDR S&P 500 ETF Trust sees renewed inflows as equity market breadth improves",
+        summary="ETF flow data shows investor demand for broad U.S. equities",
+        source="test",
+        published_at=datetime.now(timezone.utc),
+    )
+
+    military_relevance, _reason = agent_core._news_relevance(military_event, RunRequest(symbol="SPY", asset_class="equity"))
+    market_relevance, _reason = agent_core._news_relevance(market_event, RunRequest(symbol="SPY", asset_class="equity"))
+
+    assert military_relevance == "low"
+    assert market_relevance == "direct"
+
+
+def test_targeted_news_call_does_not_accept_spy_dash_six_query():
+    request = RunRequest(symbol="SPY", asset_class="equity")
+
+    assert not agent_core._has_targeted_news_call(
+        [{"name": "get_news", "arguments": {"query": "SPY-6 radar contract news"}}],
+        request,
+    )
+    assert agent_core._has_targeted_news_call(
+        [{"name": "get_news", "arguments": {"query": "SPDR S&P 500 ETF Trust market flows"}}],
+        request,
+    )
+
+
+def test_promotional_crypto_presale_content_is_filtered():
+    now = datetime.now(timezone.utc)
+    event = NewsEvent(
+        title="New Crypto Pepeto Presale Nears $10 Million While Ethereum Price Prediction Targets $4,900",
+        summary="Promotional token sale content mentioning ETH",
+        source="test",
+        published_at=now,
+    )
+    relevance, _reason = agent_core._news_relevance(event, RunRequest(symbol="ETH-USDT-SWAP", asset_class="crypto"))
+    inputs = [
+        SentimentInput(
+            text="New Crypto Pepeto presale could be the next 100x Ethereum token",
+            source="tavily",
+            timestamp=now,
+        )
+    ]
+
+    kept, rejected = workflow._filter_relevant_sentiment_inputs(inputs, RunRequest(symbol="ETH-USDT-SWAP", asset_class="crypto"))
+
+    assert relevance == "low"
+    assert kept == []
+    assert rejected == inputs

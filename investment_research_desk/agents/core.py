@@ -468,7 +468,7 @@ class SentimentAnalyst:
                     "confidence": fallback.confidence,
                 }
             )
-        return result
+        return result.model_copy(update={"evidence": [_shorten_evidence(item) for item in result.evidence[:8]]})
 
 
 class TechnicalAnalyst:
@@ -852,7 +852,7 @@ def _has_targeted_news_call(tool_calls: list[dict[str, Any]], request: RunReques
 
 def _query_mentions_instrument(query: str, request: RunRequest) -> bool:
     normalized_query = query.upper()
-    return any(token in normalized_query for token in _instrument_query_tokens(request))
+    return any(_contains_financial_token(normalized_query, token) for token in _instrument_query_tokens(request))
 
 
 def _instrument_query_tokens(request: RunRequest) -> list[str]:
@@ -864,6 +864,12 @@ def _instrument_query_tokens(request: RunRequest) -> list[str]:
         "BTC": "BITCOIN",
         "ETH": "ETHEREUM",
         "SOL": "SOLANA",
+        "SPY": "SPDR S&P 500 ETF TRUST",
+        "QQQ": "INVESCO QQQ TRUST",
+        "DIA": "SPDR DOW JONES INDUSTRIAL AVERAGE ETF",
+        "IWM": "ISHARES RUSSELL 2000 ETF",
+        "GLD": "SPDR GOLD SHARES",
+        "SLV": "ISHARES SILVER TRUST",
         "XAU": "GOLD",
         "GC": "GOLD",
         "NVDA": "NVIDIA",
@@ -881,6 +887,10 @@ def _instrument_query_tokens(request: RunRequest) -> list[str]:
         alias = aliases.get(part)
         if alias:
             tokens.append(alias)
+            if "S&P 500" in alias:
+                tokens.append("S&P 500")
+            if "NASDAQ 100" in alias:
+                tokens.append("NASDAQ 100")
     return _dedupe(tokens)
 
 
@@ -893,7 +903,15 @@ def _targeted_news_queries(request: RunRequest) -> list[str]:
         crypto_names = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana"}
         queries.append(f"{primary} {crypto_names.get(primary, primary)} crypto news")
     elif request.asset_class in {"equity", "equity_index", "other"}:
-        queries.append(f"{symbol} stock company news")
+        query_aliases = {
+            "SPY": "SPDR S&P 500 ETF Trust S&P 500 ETF market news flows",
+            "QQQ": "Invesco QQQ Trust Nasdaq 100 ETF market news flows",
+            "DIA": "SPDR Dow Jones Industrial Average ETF market news",
+            "IWM": "iShares Russell 2000 ETF market news",
+            "GLD": "SPDR Gold Shares gold ETF market news",
+            "SLV": "iShares Silver Trust silver ETF market news",
+        }
+        queries.append(query_aliases.get(symbol, f"{symbol} stock company news"))
     else:
         queries.append(f"{request.symbol} market news")
     return _dedupe(queries)
@@ -962,6 +980,10 @@ def _filter_relevant_news_events(events: list[NewsEvent], request: RunRequest) -
 
 def _news_relevance(event: NewsEvent, request: RunRequest) -> tuple[str, str]:
     haystack = " ".join([event.title, event.summary or "", event.url or ""]).upper()
+    if _is_known_nonfinancial_instrument_noise(haystack, request):
+        return "low", "known non-financial homonym noise for the instrument"
+    if _is_promotional_crypto_text(haystack):
+        return "low", "promotional crypto presale, price-prediction, or sponsored-token content"
     tokens = _instrument_query_tokens(request)
     if any(_contains_financial_token(haystack, token) for token in tokens):
         return "direct", "mentions the instrument, underlying asset, or known alias in title, summary, or URL"
@@ -984,13 +1006,51 @@ def _news_relevance(event: NewsEvent, request: RunRequest) -> tuple[str, str]:
         "FUNDING",
         "OPEN INTEREST",
     }
-    if any(term in haystack for term in macro_terms):
+    if any(_contains_market_term(haystack, term) for term in macro_terms):
         return "macro", "contains a macro, policy, liquidity, regulatory, or market-structure channel"
-    if request.asset_class == "equity" and any(term in haystack for term in {"EARNINGS", "GUIDANCE", "REVENUE", "MARGIN"}):
+    if request.asset_class == "equity" and any(_contains_market_term(haystack, term) for term in {"EARNINGS", "GUIDANCE", "REVENUE", "MARGIN"}):
         return "indirect", "contains equity fundamental context that may matter if tied to the issuer or sector"
-    if request.asset_class == "crypto" and any(term in haystack for term in {"CRYPTO", "BLOCKCHAIN", "MINING", "STABLECOIN"}):
+    if request.asset_class == "crypto" and any(_contains_market_term(haystack, term) for term in {"CRYPTO", "BLOCKCHAIN", "MINING", "STABLECOIN"}):
         return "indirect", "contains crypto-sector context without a direct instrument mention"
     return "low", "no clear direct, macro, sector, or instrument transmission channel"
+
+
+def _is_known_nonfinancial_instrument_noise(text: str, request: RunRequest) -> bool:
+    symbol = request.symbol.upper()
+    if symbol == "SPY" and any(term in text for term in {"SPY-6", "RADAR", "U.S. NAVY", "US NAVY", "NAVAL"}):
+        return True
+    return False
+
+
+def _contains_market_term(text: str, term: str) -> bool:
+    normalized = term.upper().strip()
+    if " " in normalized or "-" in normalized:
+        return normalized in text
+    return _contains_financial_token(text, normalized)
+
+
+def _is_promotional_crypto_text(text: str) -> bool:
+    promo_terms = {
+        "PRESALE",
+        "PEPETO",
+        "NEXT 100X",
+        "100X",
+        "MILLIONAIRES",
+        "PRICE PREDICTION",
+        "BUY BEFORE",
+        "LISTING CLOSES",
+        "NEW CRYPTO",
+        "TOKEN SALE",
+        "AIRDROP",
+    }
+    return any(term in text for term in promo_terms)
+
+
+def _shorten_evidence(text: Any, limit: int = 260) -> str:
+    normalized = " ".join(str(text).split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3].rstrip() + "..."
 
 
 def _sentiment_source_blocks(inputs: list[SentimentInput]) -> dict[str, Any]:
