@@ -19,6 +19,18 @@
   </p>
 </div>
 
+---
+
+<p align="center">
+  <img src="docs/assets/investment-research-desk-hero.gif" alt="Investment Research Desk hero animation" width="100%">
+</p>
+
+<div align="center">
+  <sub>▲ Hero animation made with <a href="https://github.com/alchaincyf/huashu-design/tree/master">huashu-design</a></sub>
+</div>
+
+---
+
 ## 这个项目是什么
 
 Investment Research Desk / 投研策略台是一个**本地 CLI-first 的多 Agent 投研系统**。它会把市场行情、新闻与宏观上下文、情绪输入、技术指标和多空论证整合成一份结构化研究结果。

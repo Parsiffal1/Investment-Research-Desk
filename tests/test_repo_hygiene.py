@@ -12,10 +12,16 @@ def test_root_readme_pair_has_language_switch_and_navigation():
     en = _read(REPO_ROOT / "README.md")
     zh = _read(REPO_ROOT / "README.zh.md")
     switch = "[English](README.md) | [中文](README.zh.md)"
+    hero = "docs/assets/investment-research-desk-hero.gif"
+    huashu = "https://github.com/alchaincyf/huashu-design/tree/master"
     assert switch in en
     assert switch in zh
     assert "docs/README.md" in en
     assert "docs/README.zh.md" in zh
+    assert hero in en
+    assert hero in zh
+    assert huashu in en
+    assert huashu in zh
     assert "docs/assets/screenshots/cli-interactive-menu.png" in en
     assert "docs/assets/screenshots/cli-live-progress.png" in zh
     assert "Investment Research Desk" in en
@@ -37,6 +43,11 @@ def test_docs_index_pair_exists_and_links_to_core_docs():
     ]:
         assert rel in en
         assert rel in zh
+
+
+def test_hero_assets_exist():
+    assert (DOCS_ROOT / "assets" / "investment-research-desk-hero.html").exists()
+    assert (DOCS_ROOT / "assets" / "investment-research-desk-hero.gif").exists()
 
 
 def test_readme_uses_sanitized_env_example_values():

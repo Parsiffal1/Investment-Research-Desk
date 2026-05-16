@@ -19,6 +19,18 @@
   </p>
 </div>
 
+---
+
+<p align="center">
+  <img src="docs/assets/investment-research-desk-hero.gif" alt="Investment Research Desk hero animation" width="100%">
+</p>
+
+<div align="center">
+  <sub>▲ Hero animation made with <a href="https://github.com/alchaincyf/huashu-design/tree/master">huashu-design</a></sub>
+</div>
+
+---
+
 ## What this project is
 
 Investment Research Desk is a **local CLI-first multi-agent research system**. It collects market data, news, macro context, sentiment inputs, technical indicators, and bull/bear argumentation, then compresses them into a structured research context package.
