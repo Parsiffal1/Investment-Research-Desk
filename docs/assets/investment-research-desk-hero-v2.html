@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Investment Research Desk Hero V2</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg0: #03080f;
+      --bg1: #091522;
+      --bg2: #102334;
+      --ink: #f2f8ff;
+      --soft: rgba(214, 229, 243, 0.82);
+      --muted: rgba(162, 183, 203, 0.54);
+      --line: rgba(140, 176, 206, 0.13);
+      --teal: #58d4b1;
+      --blue: #7fcfff;
+      --amber: #f2c464;
+      --red: #ff8f8f;
+      --green: #70e3b1;
+      --panel: rgba(10, 20, 31, 0.88);
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+      --sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      color: white;
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    .stage {
+      position: fixed;
+      top: 50%; left: 50%;
+      width: 1920px; height: 1080px;
+      transform: translate(-50%, -50%);
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 14% 18%, rgba(127,207,255,0.13), transparent 28%),
+        radial-gradient(circle at 82% 72%, rgba(88,212,177,0.11), transparent 24%),
+        radial-gradient(circle at 52% 118%, rgba(54,87,136,0.20), transparent 42%),
+        linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 48%, var(--bg0) 100%);
+    }
+    .grid, .glow, .footer-band { position: absolute; inset: 0; pointer-events: none; }
+    .grid {
+      background-image:
+        linear-gradient(to right, rgba(150,178,200,0.055) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(150,178,200,0.05) 1px, transparent 1px);
+      background-size: 108px 108px;
+      opacity: 0.42;
+      mask-image: linear-gradient(180deg, rgba(255,255,255,0.66), rgba(255,255,255,0.18) 72%, transparent 100%);
+    }
+    .glow::before, .glow::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      filter: blur(80px);
+      opacity: 0.36;
+    }
+    .glow::before {
+      left: 90px; top: 120px;
+      width: 420px; height: 220px;
+      background: rgba(127,207,255,0.13);
+    }
+    .glow::after {
+      right: 130px; bottom: 130px;
+      width: 380px; height: 220px;
+      background: rgba(88,212,177,0.12);
+    }
+    .gif-export .glow::before, .gif-export .glow::after {
+      filter: blur(60px);
+      opacity: 0.24;
+    }
+    .eyebrow {
+      position: absolute;
+      left: 50%; top: 88px;
+      transform: translateX(-50%);
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(179, 210, 234, 0.14);
+      background: rgba(8, 17, 28, 0.62);
+      color: rgba(209, 223, 236, 0.84);
+      font: 600 15px/1 var(--mono);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      opacity: 0;
+    }
+    .title {
+      position: absolute;
+      left: 50%; top: 318px;
+      transform: translate(-50%, -50%);
+      font-size: 122px;
+      font-weight: 770;
+      letter-spacing: -0.065em;
+      white-space: nowrap;
+      color: var(--ink);
+      opacity: 0;
+    }
+    .title .accent {
+      background: linear-gradient(90deg, #eef9ff 0%, #98deff 32%, #64d7bf 68%, #f0c86f 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .subtitle {
+      position: absolute;
+      left: 50%; top: 462px;
+      width: 1140px;
+      transform: translateX(-50%);
+      text-align: center;
+      color: var(--soft);
+      font-size: 29px;
+      line-height: 1.38;
+      letter-spacing: -0.02em;
+      opacity: 0;
+    }
+
+    .market-field {
+      position: absolute;
+      left: 50%; top: 170px;
+      width: 1560px; height: 770px;
+      transform: translateX(-50%);
+      opacity: 0;
+    }
+    .field-frame {
+      position: absolute;
+      inset: 42px 74px 52px;
+      border-radius: 28px;
+      border: 1px solid rgba(178, 210, 232, 0.14);
+      background: linear-gradient(180deg, rgba(8,18,29,0.82), rgba(8,18,29,0.58));
+      box-shadow: 0 34px 100px rgba(0,0,0,0.30);
+      overflow: hidden;
+    }
+    .gif-export .field-frame { background: linear-gradient(180deg, rgba(8,18,29,0.90), rgba(8,18,29,0.76)); }
+    .field-head {
+      position: absolute;
+      left: 24px; right: 24px; top: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      z-index: 3;
+    }
+    .field-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(176, 210, 233, 0.14);
+      background: rgba(7,16,26,0.72);
+      color: rgba(235,243,250,0.96);
+      font: 700 12px/1 var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .field-badge .dot {
+      width: 8px; height: 8px; border-radius: 999px; background: var(--teal);
+      box-shadow: 0 0 12px rgba(88,212,177,0.5);
+    }
+    .ticker-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .ticker-pill {
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(176, 210, 233, 0.12);
+      background: rgba(255,255,255,0.03);
+      color: rgba(230,239,248,0.94);
+      font: 600 12px/1 var(--mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .ticker-pill.up { color: #97efc7; }
+    .ticker-pill.down { color: #ffb2b2; }
+    .field-svg {
+      position: absolute;
+      inset: 70px 30px 24px;
+      z-index: 1;
+    }
+    .field-svg svg { width: 100%; height: 100%; overflow: visible; }
+    .axis { stroke: rgba(158, 186, 206, 0.12); stroke-width: 1; }
+    .volume-bar { opacity: 0.52; }
+    .candles { opacity: 0.95; }
+    .price-line { fill: none; stroke: rgba(127,207,255,0.94); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+    .macro-line { fill: none; stroke: rgba(242,196,100,0.82); stroke-width: 3.4; stroke-linecap: round; stroke-linejoin: round; }
+    .sentiment-line { fill: none; stroke: rgba(88,212,177,0.88); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+    .research-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+    }
+    .lens {
+      position: absolute;
+      width: 218px;
+      padding: 15px 17px;
+      border-radius: 18px;
+      border: 1px solid rgba(176,210,233,0.12);
+      background: rgba(7, 16, 26, 0.82);
+      box-shadow: 0 18px 48px rgba(0,0,0,0.22);
+    }
+    .lens b {
+      display: block;
+      color: rgba(241,247,255,0.96);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .lens span {
+      display: block;
+      color: var(--soft);
+      font-size: 13px;
+      line-height: 1.42;
+    }
+    .beam {
+      position: absolute;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(127,207,255,0.0), rgba(127,207,255,0.86), rgba(127,207,255,0.0));
+      opacity: 0.76;
+      transform-origin: left center;
+    }
+    .beam.teal { background: linear-gradient(90deg, rgba(88,212,177,0.0), rgba(88,212,177,0.84), rgba(88,212,177,0.0)); }
+    .beam.amber { background: linear-gradient(90deg, rgba(242,196,100,0.0), rgba(242,196,100,0.82), rgba(242,196,100,0.0)); }
+
+    .context-board {
+      position: absolute;
+      left: 50%; top: 184px;
+      width: 1380px; height: 740px;
+      transform: translateX(-50%);
+      opacity: 0;
+    }
+    .board-shell {
+      position: absolute;
+      inset: 0;
+      border-radius: 28px;
+      overflow: hidden;
+      border: 1px solid rgba(179,210,234,0.14);
+      background: linear-gradient(180deg, rgba(10,20,31,0.96), rgba(7,16,26,0.98));
+      box-shadow: 0 38px 112px rgba(0,0,0,0.34);
+    }
+    .board-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid rgba(176,210,233,0.10);
+    }
+    .board-title b {
+      display: block;
+      color: rgba(244,250,255,0.98);
+      font-size: 30px;
+      font-weight: 760;
+      letter-spacing: -0.03em;
+    }
+    .board-title span {
+      display: block;
+      margin-top: 8px;
+      color: var(--soft);
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .head-pills {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: 560px;
+    }
+    .head-pill {
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(176,210,233,0.12);
+      background: rgba(255,255,255,0.03);
+      color: rgba(230,239,248,0.92);
+      font: 600 12px/1 var(--mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .board-grid {
+      display: grid;
+      grid-template-columns: 1.14fr 0.86fr;
+      gap: 18px;
+      padding: 20px 24px 24px;
+      height: calc(100% - 94px);
+    }
+    .panel {
+      border-radius: 22px;
+      border: 1px solid rgba(176,210,233,0.10);
+      background: rgba(255,255,255,0.025);
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .panel h3 {
+      margin: 0 0 14px;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(231,241,250,0.96);
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .stat {
+      padding: 14px 14px 12px;
+      border-radius: 16px;
+      background: rgba(6,15,24,0.82);
+      border: 1px solid rgba(176,210,233,0.10);
+    }
+    .stat b {
+      display: block;
+      color: rgba(239,247,255,0.96);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .stat span {
+      display: block;
+      color: var(--soft);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .stat span.up { color: #97efc7; }
+    .stat span.warn { color: #f3d184; }
+    .stat span.blue { color: #ace4ff; }
+    .copy {
+      display: grid;
+      gap: 10px;
+    }
+    .copy p {
+      margin: 0;
+      color: rgba(214,229,242,0.88);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .artifact-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .artifact {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 14px;
+      border-radius: 14px;
+      background: rgba(6,15,24,0.82);
+      border: 1px solid rgba(176,210,233,0.10);
+    }
+    .artifact b {
+      color: rgba(239,247,255,0.96);
+      font-size: 13px;
+      letter-spacing: 0.04em;
+    }
+    .artifact span {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+    .footer-band {
+      top: auto;
+      bottom: 42px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      color: rgba(213,228,244,0.82);
+      font-size: 17px;
+      letter-spacing: -0.01em;
+      opacity: 0;
+    }
+    .footer-band strong { color: rgba(246,250,255,0.98); }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <div class="grid"></div>
+    <div class="glow"></div>
+
+    <div class="eyebrow" id="eyebrow">EQUITIES · CRYPTO · MARKET RESEARCH</div>
+    <div class="title" id="title">Investment <span class="accent">Research Desk</span></div>
+    <div class="subtitle" id="subtitle">A local-first financial research assistant that watches price structure, macro pressure, sentiment flow, and bull / bear disagreement before turning them into inspectable context.</div>
+
+    <section class="market-field" id="marketField">
+      <div class="field-frame"></div>
+      <div class="field-head">
+        <div class="field-badge"><span class="dot"></span> Cross-asset market field</div>
+        <div class="ticker-row">
+          <div class="ticker-pill up">SPY +0.42%</div>
+          <div class="ticker-pill up">QQQ +0.57%</div>
+          <div class="ticker-pill up">ETH-USDT-SWAP +1.81%</div>
+          <div class="ticker-pill down">funding +0.021%</div>
+          <div class="ticker-pill">OI pulse</div>
+          <div class="ticker-pill">CPI watch</div>
+        </div>
+      </div>
+      <div class="field-svg">
+        <svg viewBox="0 0 1420 620" preserveAspectRatio="none" aria-hidden="true">
+          <g opacity="0.55">
+            <line class="axis" x1="0" y1="500" x2="1420" y2="500" />
+            <line class="axis" x1="0" y1="390" x2="1420" y2="390" />
+            <line class="axis" x1="0" y1="280" x2="1420" y2="280" />
+            <line class="axis" x1="0" y1="170" x2="1420" y2="170" />
+            <line class="axis" x1="0" y1="60" x2="1420" y2="60" />
+          </g>
+          <g id="volumes">
+            <rect class="volume-bar" x="40" y="440" width="16" height="60" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="80" y="420" width="16" height="80" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="120" y="454" width="16" height="46" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="160" y="396" width="16" height="104" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="200" y="448" width="16" height="52" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="240" y="408" width="16" height="92" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="280" y="422" width="16" height="78" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="320" y="462" width="16" height="38" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="360" y="410" width="16" height="90" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="400" y="382" width="16" height="118" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="440" y="430" width="16" height="70" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="480" y="454" width="16" height="46" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="520" y="414" width="16" height="86" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="560" y="440" width="16" height="60" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="600" y="396" width="16" height="104" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="640" y="424" width="16" height="76" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="680" y="452" width="16" height="48" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="720" y="404" width="16" height="96" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="760" y="390" width="16" height="110" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="800" y="434" width="16" height="66" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="840" y="450" width="16" height="50" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="880" y="410" width="16" height="90" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="920" y="394" width="16" height="106" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="960" y="434" width="16" height="66" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="1000" y="446" width="16" height="54" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="1040" y="398" width="16" height="102" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="1080" y="420" width="16" height="80" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="1120" y="450" width="16" height="50" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="1160" y="406" width="16" height="94" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="1200" y="394" width="16" height="106" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="1240" y="432" width="16" height="68" fill="rgba(127,207,255,0.18)" />
+            <rect class="volume-bar" x="1280" y="448" width="16" height="52" fill="rgba(127,207,255,0.18)" />
+          </g>
+          <g class="candles" id="candles"></g>
+          <path class="price-line" id="priceLine" d="M28 314 C108 298, 150 242, 214 252 C296 266, 338 358, 414 334 C484 312, 542 198, 622 216 C702 234, 744 316, 824 302 C904 288, 966 176, 1046 192 C1114 206, 1164 274, 1230 262 C1294 250, 1348 204, 1394 182" />
+          <path class="macro-line" id="macroLine" d="M30 170 C112 162, 166 176, 238 150 C314 122, 384 120, 448 142 C520 166, 588 214, 648 210 C720 206, 782 162, 852 156 C930 148, 986 190, 1060 212 C1130 232, 1202 226, 1280 198 C1342 176, 1374 156, 1400 146" />
+          <path class="sentiment-line" id="sentimentLine" d="M28 376 C96 392, 148 380, 216 402 C286 426, 348 470, 422 460 C492 450, 560 392, 628 380 C706 366, 764 392, 832 420 C908 452, 970 474, 1048 458 C1120 442, 1188 390, 1266 378 C1320 370, 1362 376, 1400 364" />
+        </svg>
+      </div>
+      <div class="research-overlay">
+        <div class="lens" id="lensA" style="left: 110px; top: 162px;"><b>Macro context</b><span>Rates, CPI, yields, and cross-asset pressure frame what matters before any conclusion is formed.</span></div>
+        <div class="lens" id="lensB" style="left: 190px; top: 472px;"><b>Sentiment flow</b><span>Headline and crowd emotion are filtered into usable signals instead of becoming raw noise.</span></div>
+        <div class="lens" id="lensC" style="right: 126px; top: 158px;"><b>Technical state</b><span>K-line structure, momentum, volatility, and volume shifts stay visible as first-class evidence.</span></div>
+        <div class="lens" id="lensD" style="right: 160px; top: 474px;"><b>Bull / bear debate</b><span>The system compresses disagreement into a clearer research context instead of pretending certainty.</span></div>
+        <div class="beam" id="beamA" style="left: 320px; top: 252px; width: 360px; transform: rotate(10deg);"></div>
+        <div class="beam teal" id="beamB" style="left: 380px; top: 520px; width: 360px; transform: rotate(-8deg);"></div>
+        <div class="beam amber" id="beamC" style="left: 880px; top: 232px; width: 320px; transform: rotate(-18deg);"></div>
+        <div class="beam teal" id="beamD" style="left: 880px; top: 540px; width: 300px; transform: rotate(14deg);"></div>
+      </div>
+    </section>
+
+    <section class="context-board" id="contextBoard">
+      <div class="board-shell">
+        <div class="board-head">
+          <div class="board-title">
+            <b>Final Research Context</b>
+            <span>Financial research support · not execution infrastructure</span>
+          </div>
+          <div class="head-pills">
+            <div class="head-pill">k-line + macro + sentiment</div>
+            <div class="head-pill">equities + crypto</div>
+            <div class="head-pill">trace + metrics + artifacts</div>
+            <div class="head-pill">research context only</div>
+          </div>
+        </div>
+        <div class="board-grid">
+          <div class="panel">
+            <h3>Research output shape</h3>
+            <div class="stats">
+              <div class="stat"><b>Directional view</b><span class="up">constructive but selective</span></div>
+              <div class="stat"><b>Risk level</b><span class="warn">macro-sensitive</span></div>
+              <div class="stat"><b>Confidence</b><span class="blue">evidence-weighted</span></div>
+              <div class="stat"><b>Regime</b><span>trend with event risk</span></div>
+            </div>
+            <div class="copy">
+              <p>This desk is built to help a researcher read markets, not to replace them. Price structure, macro pressure, sentiment, and disagreement are all kept visible instead of being flattened into a single confident answer.</p>
+              <p>The result is a more inspectable financial workflow: one that can look at cross-asset motion, keep track of uncertainty, and leave behind artifacts worth reviewing after the run.</p>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Run artifacts</h3>
+            <div class="artifact-list">
+              <div class="artifact"><b>final_research_context.json</b><span>decision surface</span></div>
+              <div class="artifact"><b>final_market_context_cache.json</b><span>downstream cache</span></div>
+              <div class="artifact"><b>research_brief.md</b><span>human-readable summary</span></div>
+              <div class="artifact"><b>trace.json</b><span>agent / tool visibility</span></div>
+              <div class="artifact"><b>metrics.json</b><span>runtime telemetry</span></div>
+            </div>
+            <div class="copy" style="margin-top:16px;">
+              <p><strong>Boundaries:</strong> no order placement, no account access, no execution instruction, no portfolio action. This is a research assistant for financial context.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-band" id="footerBand"><strong>Research context only.</strong> A local financial workflow for reading markets before acting on them.</div>
+  </div>
+
+  <script>
+    const DURATION = 10.5;
+    const stage = document.getElementById('stage');
+    if (window.__gifExport) stage.classList.add('gif-export');
+
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const easeOut = t => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+    const easeInOut = t => {
+      t = clamp(t, 0, 1);
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    };
+    const between = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+
+    const eyebrow = document.getElementById('eyebrow');
+    const title = document.getElementById('title');
+    const subtitle = document.getElementById('subtitle');
+    const marketField = document.getElementById('marketField');
+    const contextBoard = document.getElementById('contextBoard');
+    const footerBand = document.getElementById('footerBand');
+    const lenses = [...document.querySelectorAll('.lens')];
+    const beams = [...document.querySelectorAll('.beam')];
+    beams.forEach((beam) => {
+      beam.dataset.baseTransform = beam.style.transform || '';
+      beam.style.transformOrigin = 'left center';
+    });
+    const tickerPills = [...document.querySelectorAll('.ticker-pill')];
+
+    const priceLine = document.getElementById('priceLine');
+    const macroLine = document.getElementById('macroLine');
+    const sentimentLine = document.getElementById('sentimentLine');
+    const pathEls = [priceLine, macroLine, sentimentLine];
+    const pathLens = pathEls.map(el => el.getTotalLength());
+    pathEls.forEach((el, i) => {
+      el.style.strokeDasharray = pathLens[i];
+      el.style.strokeDashoffset = pathLens[i];
+    });
+
+    const candleGroup = document.getElementById('candles');
+    const candlesData = [
+      [54, 330, 294, 346, 304], [94, 304, 272, 320, 286], [134, 286, 252, 300, 262], [174, 266, 240, 282, 254],
+      [214, 254, 232, 278, 270], [254, 272, 246, 292, 258], [294, 258, 228, 274, 236], [334, 236, 212, 252, 224],
+      [374, 224, 204, 246, 240], [414, 240, 214, 258, 226], [454, 226, 196, 242, 208], [494, 208, 188, 230, 220],
+      [534, 220, 196, 240, 206], [574, 206, 178, 220, 188], [614, 188, 168, 212, 202], [654, 202, 182, 226, 192],
+      [694, 192, 164, 204, 170], [734, 170, 150, 190, 182], [774, 182, 160, 198, 168], [814, 168, 148, 186, 156],
+      [854, 156, 138, 180, 174], [894, 174, 152, 196, 162], [934, 162, 144, 184, 170], [974, 170, 154, 190, 160],
+      [1014, 160, 138, 176, 148], [1054, 148, 128, 170, 140], [1094, 140, 120, 160, 132], [1134, 132, 116, 154, 146],
+      [1174, 146, 126, 164, 136], [1214, 136, 118, 154, 128], [1254, 128, 112, 148, 140], [1294, 140, 122, 156, 130]
+    ];
+    candleGroup.innerHTML = candlesData.map(([x,o,h,l,c]) => {
+      const up = c < o;
+      const color = up ? 'rgba(112,227,177,0.94)' : 'rgba(255,143,143,0.92)';
+      const y = Math.min(o,c);
+      const hBody = Math.max(8, Math.abs(c-o));
+      return `<g opacity="0.95"><line x1="${x}" y1="${h}" x2="${x}" y2="${l}" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/><rect x="${x-7}" y="${y}" width="14" height="${hBody}" rx="4" fill="${color}"/></g>`;
+    }).join('');
+
+    function sceneOpacity(t, start, end, fade = 0.75) {
+      const inn = easeOut(between(t, start, start + fade));
+      const out = 1 - easeInOut(between(t, end - fade, end));
+      return clamp(inn * out, 0, 1);
+    }
+
+    function update(t) {
+      t = ((t % DURATION) + DURATION) % DURATION;
+
+      const introIn = easeOut(between(t, 0.08, 1.18));
+      const introOut = 1 - easeInOut(between(t, 1.9, 2.65));
+      const intro = clamp(introIn * introOut, 0, 1);
+      eyebrow.style.opacity = intro.toFixed(3);
+      eyebrow.style.transform = `translateX(-50%) translateY(${lerp(18, 0, introIn)}px)`;
+      title.style.opacity = intro.toFixed(3);
+      title.style.transform = `translate(-50%, -50%) translateY(${lerp(40, 0, introIn)}px) scale(${lerp(0.985, 1, introIn)})`;
+      subtitle.style.opacity = (intro * 0.97).toFixed(3);
+      subtitle.style.transform = `translateX(-50%) translateY(${lerp(28, 0, introIn)}px)`;
+
+      const fieldStart = 2.0, fieldEnd = 7.25;
+      const fieldVis = sceneOpacity(t, fieldStart, fieldEnd, 0.9);
+      marketField.style.opacity = fieldVis.toFixed(3);
+      marketField.style.transform = `translateX(-50%) translateY(${lerp(34, 0, easeOut(between(t, fieldStart, fieldStart + 1.0)))}px)`;
+
+      const d1 = easeOut(between(t, 2.2, 4.0));
+      const d2 = easeOut(between(t, 2.4, 4.2));
+      const d3 = easeOut(between(t, 2.6, 4.4));
+      priceLine.style.strokeDashoffset = String(pathLens[0] * (1 - d1));
+      macroLine.style.strokeDashoffset = String(pathLens[1] * (1 - d2));
+      sentimentLine.style.strokeDashoffset = String(pathLens[2] * (1 - d3));
+
+      tickerPills.forEach((pill, i) => {
+        const p = easeOut(between(t, 2.1 + i * 0.08, 2.9 + i * 0.08));
+        pill.style.opacity = String(fieldVis * p);
+        pill.style.transform = `translateY(${lerp(12, 0, p)}px)`;
+      });
+
+      lenses.forEach((lens, i) => {
+        const p = easeOut(between(t, 3.4 + i * 0.18, 4.4 + i * 0.18));
+        lens.style.opacity = String(fieldVis * p);
+        lens.style.transform = `translate(${lerp(i < 2 ? -18 : 18, 0, p)}px, ${lerp(18, 0, p)}px)`;
+      });
+      beams.forEach((beam, i) => {
+        const p = easeOut(between(t, 3.1 + i * 0.12, 4.0 + i * 0.12));
+        beam.style.opacity = String(fieldVis * p * 0.78);
+        const base = beam.dataset.baseTransform;
+        beam.style.transform = `${base} scaleX(${lerp(0.1, 1, p)})`;
+      });
+
+      const fieldFadeLate = 1 - easeInOut(between(t, 6.2, 7.25));
+      marketField.style.opacity = String(fieldVis * fieldFadeLate);
+
+      const boardStart = 6.3, boardEnd = 10.2;
+      const boardVis = sceneOpacity(t, boardStart, boardEnd, 0.88);
+      contextBoard.style.opacity = boardVis.toFixed(3);
+      contextBoard.style.transform = `translateX(-50%) translateY(${lerp(36, 0, easeOut(between(t, boardStart, boardStart + 0.9)))}px) scale(${lerp(0.985, 1, boardVis)})`;
+
+      const footerIn = easeOut(between(t, 8.05, 9.2));
+      const footerOut = 1 - easeInOut(between(t, 10.0, 10.5));
+      const footer = clamp(footerIn * footerOut, 0, 1);
+      footerBand.style.opacity = footer.toFixed(3);
+      footerBand.style.transform = `translateY(${lerp(16, 0, footerIn)}px)`;
+    }
+
+    let start = performance.now();
+    function tick(now) {
+      const sec = (now - start) / 1000;
+      update(sec);
+      requestAnimationFrame(tick);
+    }
+
+    window.__seek = function(sec) {
+      start = performance.now() - sec * 1000;
+      update(sec);
+    };
+
+    document.fonts.ready.then(() => {
+      requestAnimationFrame(() => {
+        window.__ready = true;
+        requestAnimationFrame(tick);
+      });
+    });
+  </script>
+</body>
+</html>
