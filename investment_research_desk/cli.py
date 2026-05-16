@@ -195,6 +195,7 @@ def interactive() -> None:
             sentiment_base_model=None,
             sentiment_adapter_path=None,
             sentiment_score_batch_size=None,
+            language=settings.report_language,
         )
         return
     if contract.request is None:
@@ -309,7 +310,7 @@ def report(
     sentiment_base_model: Optional[str] = typer.Option(None, "--sentiment-base-model", help="HF base model for sentiment adapter runtime."),
     sentiment_adapter_path: Optional[Path] = typer.Option(None, "--sentiment-adapter-path", help="PEFT adapter path for Sentiment Analyst."),
     sentiment_score_batch_size: Optional[int] = typer.Option(None, "--sentiment-score-batch-size", min=1, max=16, help="Forced-choice scoring batch size."),
-    language: str = typer.Option("en", "--language", help="Report language: en or zh."),
+    language: Optional[str] = typer.Option(None, "--language", help="Report language: en or zh. Defaults to IRD_REPORT_LANGUAGE."),
     checkpoint: bool = typer.Option(False, "--checkpoint", help="Save resumable checkpoints after graph steps."),
     resume: Optional[str] = typer.Option(None, "--resume", help="Resume from checkpoint by run_id."),
     clear_checkpoints: bool = typer.Option(False, "--clear-checkpoints", help="Clear saved checkpoints before running."),
@@ -351,7 +352,7 @@ def run_report(
     resume: str | None,
     clear_checkpoints: bool,
     runs_dir: Path | None,
-    language: str = "en",
+    language: str | None = None,
 ) -> None:
     if resume:
         _run_resume(resume, checkpoint=checkpoint, clear_checkpoints=clear_checkpoints, runs_dir=runs_dir)
@@ -369,7 +370,7 @@ def run_report(
             sentiment_base_model=sentiment_base_model,
             sentiment_adapter_path=sentiment_adapter_path,
             sentiment_score_batch_size=sentiment_score_batch_size,
-            language=language,
+            language=language or load_settings().report_language,
         )
     except ValueError as exc:
         _exit_with_error(str(exc))
@@ -893,6 +894,7 @@ def _print_request_review(request, checkpoint: bool, runs_dir: Path, mode: str) 
     table.add_row("sentiment_provider", request.sentiment_provider or "settings/default")
     table.add_row("sentiment_base_model", request.sentiment_base_model or "settings/default")
     table.add_row("sentiment_adapter_path", request.sentiment_adapter_path or "settings/default")
+    table.add_row("language", request.language)
     table.add_row("checkpoint", str(checkpoint))
     table.add_row("runs_dir", str(runs_dir))
     console.print(table)
@@ -940,23 +942,26 @@ def _print_console_report(state: dict) -> None:
     risk = state.get("risk", {})
     data = state.get("data", {})
     metrics = state.get("metrics") or {}
+    debate = state.get("research_debate") or {}
+    language = final.source_metadata.get("language", "en")
+    t = _report_labels(language)
 
     executive = Table.grid(expand=True)
     executive.add_column(ratio=1)
     executive.add_column(ratio=3)
-    executive.add_row("Symbol", final.symbol)
-    executive.add_row("Directional View", f"[{_direction_style(final.directional_view)}]{final.directional_view.upper()}[/]")
-    executive.add_row("Directional Rationale", _console_safe(final.directional_rationale))
-    executive.add_row("Balanced View", final.balanced_view)
-    executive.add_row("Risk Level", final.risk_level)
-    executive.add_row("Confidence", str(final.confidence))
-    executive.add_row("Horizon", final.horizon)
-    executive.add_row("Market Regime", final.market_regime)
+    executive.add_row(t["symbol"], final.symbol)
+    executive.add_row(t["directional_view"], f"[{_direction_style(final.directional_view)}]{final.directional_view.upper()}[/]")
+    executive.add_row(t["directional_rationale"], _console_safe(final.directional_rationale))
+    executive.add_row(t["balanced_view"], final.balanced_view)
+    executive.add_row(t["risk_level"], final.risk_level)
+    executive.add_row(t["confidence"], str(final.confidence))
+    executive.add_row(t["horizon"], final.horizon)
+    executive.add_row(t["market_regime"], final.market_regime)
     console.print(
         Panel(
             executive,
-            title=f"Final Research Context Report | {final.symbol}",
-            subtitle="Research context only; not financial advice or execution instruction",
+            title=f"{t['final_report']} | {final.symbol}",
+            subtitle=t["boundary"],
             border_style=_direction_style(final.directional_view),
         )
     )
@@ -1032,19 +1037,28 @@ def _print_console_report(state: dict) -> None:
                 ],
             ),
             _agent_panel(
-                "Research Reporter",
+                t["research_reporter"],
                 [
-                    ("Fundamental Summary", final.fundamental_summary),
-                    ("News Impact Summary", final.news_impact_summary),
-                    ("Sentiment Summary", final.sentiment_summary),
-                    ("Technical Summary", final.technical_summary),
-                    ("Key Drivers", _plain_list(final.key_drivers)),
-                    ("Key Risks", _plain_list(final.key_risks)),
-                    ("Uncertainty Factors", _plain_list(final.uncertainty_factors)),
+                    (t["fundamental_summary"], final.fundamental_summary),
+                    (t["news_summary"], final.news_impact_summary),
+                    (t["sentiment_summary"], final.sentiment_summary),
+                    (t["technical_summary"], final.technical_summary),
+                    (t["key_drivers"], _plain_list(final.key_drivers)),
+                    (t["key_risks"], _plain_list(final.key_risks)),
+                    (t["uncertainty"], _plain_list(final.uncertainty_factors)),
                 ],
             ),
             _agent_panel(
-                "Data And Run Metadata",
+                t["debate"],
+                [
+                    (t["points_agreement"], _plain_list(debate.get("points_of_agreement"))),
+                    (t["key_tensions"], _plain_list(debate.get("key_tensions"))),
+                    (t["evidence_quality"], _plain_list(debate.get("evidence_quality_notes"))),
+                    (t["reporter_handoff"], debate.get("reporter_handoff")),
+                ],
+            ),
+            _agent_panel(
+                t["data_metadata"],
                 [
                     ("OHLCV Bars", len(data.get("ohlcv") or [])),
                     ("Market Context Sections", ", ".join((data.get("market_context") or {}).keys()) or "None"),
@@ -1052,18 +1066,83 @@ def _print_console_report(state: dict) -> None:
                     ("Sentiment Inputs", len(data.get("sentiment_inputs") or [])),
                     ("Provider Mode", (data.get("source_metadata") or {}).get("provider_mode", "unknown")),
                     ("Tool Policy", (data.get("source_metadata") or {}).get("tool_call_policy", "unknown")),
+                    ("Agent Execution", (data.get("source_metadata") or {}).get("agent_execution_mode", "unknown")),
+                    ("Provider Warnings", _plain_list((data.get("source_metadata") or {}).get("agent_tool_warnings"))),
+                    ("Sentiment Runtime", (data.get("source_metadata") or {}).get("sentiment_runtime", "main")),
                     ("Guardrail Violations", ", ".join(metrics.get("guardrail_violations") or []) or "None"),
                 ],
             ),
             _agent_panel(
-                "Usage Boundary",
+                t["usage_boundary"],
                 [
-                    ("Constraints", _plain_list(final.usage_constraints)),
-                    ("Downstream Context", final.downstream_agent_context),
+                    (t["constraints"], _plain_list(final.usage_constraints)),
+                    (t["downstream"], final.downstream_agent_context),
                 ],
             ),
         )
     )
+
+
+def _report_labels(language: str) -> dict[str, str]:
+    if language == "zh":
+        return {
+            "final_report": "最终投研上下文报告",
+            "boundary": "仅作投研上下文，不是投资建议或交易执行指令",
+            "symbol": "标的",
+            "directional_view": "方向判断",
+            "directional_rationale": "判断依据",
+            "balanced_view": "综合观点",
+            "risk_level": "风险等级",
+            "confidence": "置信度",
+            "horizon": "研究周期",
+            "market_regime": "市场状态",
+            "research_reporter": "最终研究报告",
+            "fundamental_summary": "基本面/宏观摘要",
+            "news_summary": "新闻影响摘要",
+            "sentiment_summary": "情绪摘要",
+            "technical_summary": "技术摘要",
+            "key_drivers": "关键驱动",
+            "key_risks": "关键风险",
+            "uncertainty": "不确定因素",
+            "debate": "Bull/Bear 辩论结论",
+            "points_agreement": "共识",
+            "key_tensions": "主要分歧",
+            "evidence_quality": "证据质量说明",
+            "reporter_handoff": "报告交接说明",
+            "data_metadata": "数据与运行元信息",
+            "usage_boundary": "使用边界",
+            "constraints": "约束",
+            "downstream": "下游使用说明",
+        }
+    return {
+        "final_report": "Final Research Context Report",
+        "boundary": "Research context only; not financial advice or execution instruction",
+        "symbol": "Symbol",
+        "directional_view": "Directional View",
+        "directional_rationale": "Directional Rationale",
+        "balanced_view": "Balanced View",
+        "risk_level": "Risk Level",
+        "confidence": "Confidence",
+        "horizon": "Horizon",
+        "market_regime": "Market Regime",
+        "research_reporter": "Research Reporter",
+        "fundamental_summary": "Fundamental Summary",
+        "news_summary": "News Impact Summary",
+        "sentiment_summary": "Sentiment Summary",
+        "technical_summary": "Technical Summary",
+        "key_drivers": "Key Drivers",
+        "key_risks": "Key Risks",
+        "uncertainty": "Uncertainty Factors",
+        "debate": "Bull/Bear Debate Conclusion",
+        "points_agreement": "Points Of Agreement",
+        "key_tensions": "Key Tensions",
+        "evidence_quality": "Evidence Quality Notes",
+        "reporter_handoff": "Reporter Handoff",
+        "data_metadata": "Data And Run Metadata",
+        "usage_boundary": "Usage Boundary",
+        "constraints": "Constraints",
+        "downstream": "Downstream Context",
+    }
 
 
 def _agent_panel(title: str, rows: list[tuple[str, Any]]) -> Panel:

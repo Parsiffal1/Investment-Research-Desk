@@ -1230,15 +1230,14 @@ def render_markdown_report(state: dict[str, Any]) -> str:
     data = NormalizedData.model_validate(state["data"])
     debate = state.get("research_debate") or {}
     metrics = state.get("metrics") or {}
+    language = str(data.source_metadata.get("language", "en"))
+    h = _markdown_labels(language)
 
     return "\n\n".join(
         [
-            f"# Investment Research Desk Report: {final.symbol}",
-            (
-                "Use as research context only. This is not financial advice, an order instruction, "
-                "position sizing guidance, or a profitability claim."
-            ),
-            "## Executive Context\n"
+            f"# {h['title']}: {final.symbol}",
+            h["boundary"],
+            f"## {h['executive']}\n"
             f"- Asset class: {final.asset_class}\n"
             f"- Horizon: {final.horizon}\n"
             f"- Market regime: {final.market_regime}\n"
@@ -1294,11 +1293,12 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"### Evidence\n{_md_list(risk.evidence)}\n\n"
             f"### Conditions\n{_md_list(risk.conditions)}\n\n"
             f"- Confidence: {risk.confidence}",
-            "## Bull / Bear Debate\n"
+            f"## {h['debate']}\n"
             f"- Rounds: {debate.get('round_count', 1)}\n"
             f"- Points of agreement: {_inline_list(debate.get('points_of_agreement', []))}\n"
             f"- Key tensions: {_inline_list(debate.get('key_tensions', []))}\n"
             f"- Evidence quality notes: {_inline_list(debate.get('evidence_quality_notes', []))}\n\n"
+            f"### {h['debate_conclusion']}\n{debate.get('reporter_handoff', 'None')}\n\n"
             f"### Round Log\n{_debate_round_log(debate.get('rounds', []))}",
             "## Final Research Reporter\n"
             f"### Fundamental Summary\n{final.fundamental_summary}\n\n"
@@ -1308,18 +1308,48 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"### Key Drivers\n{_md_list(final.key_drivers)}\n\n"
             f"### Key Risks\n{_md_list(final.key_risks)}\n\n"
             f"### Uncertainty Factors\n{_md_list(final.uncertainty_factors)}",
-            "## Data And Run Metadata\n"
+            f"## {h['data_metadata']}\n"
             f"- OHLCV bars: {len(data.ohlcv)}\n"
             f"- Market context sections: {', '.join(data.market_context.keys()) or 'None'}\n"
             f"- News events: {len(data.news_events)}\n"
             f"- Sentiment inputs: {len(data.sentiment_inputs)}\n"
             f"- Provider mode: {data.source_metadata.get('provider_mode', 'unknown')}\n"
             f"- Tool policy: {data.source_metadata.get('tool_call_policy', 'unknown')}\n"
+            f"- Agent execution mode: {data.source_metadata.get('agent_execution_mode', 'unknown')}\n"
+            f"- Sentiment runtime: {data.source_metadata.get('sentiment_runtime', 'main')}\n"
+            f"- Provider warnings: {_inline_list(_flatten_warnings(data.source_metadata.get('agent_tool_warnings')))}\n"
             f"- Guardrail violations: {_guardrail_summary(metrics)}",
-            f"## Usage Constraints\n{_md_list(final.usage_constraints)}",
-            f"## Downstream Context\n{final.downstream_agent_context}",
+            f"## {h['usage_constraints']}\n{_md_list(final.usage_constraints)}",
+            f"## {h['downstream']}\n{final.downstream_agent_context}",
         ]
     )
+
+
+def _markdown_labels(language: str) -> dict[str, str]:
+    if language == "zh":
+        return {
+            "title": "Investment Research Desk 投研策略台报告",
+            "boundary": "仅作投研上下文使用，不是投资建议、下单指令、仓位建议或收益承诺。",
+            "executive": "执行摘要",
+            "debate": "Bull/Bear 辩论",
+            "debate_conclusion": "辩论结论",
+            "data_metadata": "数据与运行元信息",
+            "usage_constraints": "使用约束",
+            "downstream": "下游上下文",
+        }
+    return {
+        "title": "Investment Research Desk Report",
+        "boundary": (
+            "Use as research context only. This is not financial advice, an order instruction, "
+            "position sizing guidance, or a profitability claim."
+        ),
+        "executive": "Executive Context",
+        "debate": "Bull / Bear Debate",
+        "debate_conclusion": "Debate Conclusion",
+        "data_metadata": "Data And Run Metadata",
+        "usage_constraints": "Usage Constraints",
+        "downstream": "Downstream Context",
+    }
 
 
 def _md_list(items: list[Any]) -> str:
@@ -1344,6 +1374,22 @@ def _guardrail_summary(metrics: dict[str, Any]) -> str:
         return "pending during report render"
     violations = metrics.get("guardrail_violations", [])
     return ", ".join(violations) if violations else "None"
+
+
+def _flatten_warnings(value: Any) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, dict):
+        rows: list[str] = []
+        for key, items in value.items():
+            if isinstance(items, list):
+                rows.extend(f"{key}: {item}" for item in items)
+            else:
+                rows.append(f"{key}: {items}")
+        return rows
+    return [str(value)]
 
 
 def _financial_tool_query_instruction(request: RunRequest) -> str:
