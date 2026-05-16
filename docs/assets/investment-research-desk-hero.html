@@ -9,22 +9,23 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg0: #041018;
-      --bg1: #071b26;
-      --bg2: #0b2738;
-      --ink: rgba(244, 250, 255, 0.98);
-      --soft: rgba(204, 223, 238, 0.75);
-      --muted: rgba(170, 193, 212, 0.52);
-      --line: rgba(135, 178, 207, 0.18);
-      --teal: #49c5a6;
-      --teal-soft: rgba(73, 197, 166, 0.18);
-      --blue: #6ec8ff;
-      --blue-soft: rgba(110, 200, 255, 0.16);
-      --violet: #9e8cff;
-      --amber: #f6c454;
-      --danger: #ff7f7f;
-      --panel: rgba(10, 22, 31, 0.86);
-      --panel-2: rgba(15, 29, 41, 0.94);
+      --bg0: #03070d;
+      --bg1: #08131e;
+      --bg2: #0d2030;
+      --ink: #f4f9ff;
+      --soft: rgba(213, 228, 244, 0.82);
+      --muted: rgba(160, 183, 205, 0.54);
+      --line: rgba(141, 176, 205, 0.13);
+      --teal: #57d2b2;
+      --teal-soft: rgba(87, 210, 178, 0.18);
+      --blue: #79cfff;
+      --blue-soft: rgba(121, 207, 255, 0.16);
+      --amber: #f5c15a;
+      --amber-soft: rgba(245, 193, 90, 0.17);
+      --violet: #9f8fff;
+      --danger: #ff8c8c;
+      --panel: rgba(10, 19, 29, 0.84);
+      --panel-2: rgba(11, 22, 34, 0.96);
       --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
       --sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     }
@@ -35,7 +36,7 @@
       height: 100%;
       overflow: hidden;
       background: #000;
-      color: #fff;
+      color: white;
       font-family: var(--sans);
       -webkit-font-smoothing: antialiased;
       text-rendering: optimizeLegibility;
@@ -47,358 +48,615 @@
       transform: translate(-50%, -50%);
       overflow: hidden;
       background:
-        radial-gradient(circle at 12% 18%, rgba(110, 200, 255, 0.18), transparent 28%),
-        radial-gradient(circle at 86% 72%, rgba(73, 197, 166, 0.14), transparent 25%),
-        radial-gradient(circle at 50% 118%, rgba(47, 82, 130, 0.24), transparent 42%),
-        linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 44%, var(--bg0) 100%);
+        radial-gradient(circle at 15% 20%, rgba(121, 207, 255, 0.14), transparent 28%),
+        radial-gradient(circle at 82% 68%, rgba(87, 210, 178, 0.11), transparent 24%),
+        radial-gradient(circle at 48% 118%, rgba(40, 70, 112, 0.24), transparent 42%),
+        linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 48%, var(--bg0) 100%);
     }
-    .noise, .grid, .glow { position: absolute; inset: 0; pointer-events: none; }
+    .noise,.grid,.scanlines,.orbs,.footer-band {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
     .noise {
-      opacity: 0.045;
+      opacity: 0.04;
       background-image:
-        radial-gradient(rgba(255,255,255,0.7) 0.34px, transparent 0.52px),
-        radial-gradient(rgba(255,255,255,0.16) 0.28px, transparent 0.44px);
-      background-size: 5px 5px, 8px 8px;
-      background-position: 0 0, 2px 1px;
-      mix-blend-mode: soft-light;
+        radial-gradient(rgba(255,255,255,0.6) 0.35px, transparent 0.5px),
+        radial-gradient(rgba(255,255,255,0.18) 0.22px, transparent 0.42px);
+      background-size: 5px 5px, 9px 9px;
+      background-position: 0 0, 2px 3px;
+      mix-blend-mode: screen;
     }
     .gif-export .noise { opacity: 0; }
     .grid {
       background-image:
-        linear-gradient(to right, rgba(156, 190, 221, 0.08) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(156, 190, 221, 0.07) 1px, transparent 1px);
-      background-size: 96px 96px;
-      opacity: 0.40;
-      mask-image: linear-gradient(180deg, rgba(255,255,255,0.62), rgba(255,255,255,0.16) 72%, transparent 100%);
+        linear-gradient(to right, rgba(146,174,198,0.055) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(146,174,198,0.05) 1px, transparent 1px);
+      background-size: 120px 120px;
+      opacity: 0.46;
+      mask-image: linear-gradient(180deg, rgba(255,255,255,0.64), rgba(255,255,255,0.18) 72%, transparent 100%);
     }
-    .gif-export .grid { opacity: 0.28; }
-    .glow::before, .glow::after {
-      content: "";
+    .scanlines {
+      opacity: 0.06;
+      background: repeating-linear-gradient(180deg, rgba(255,255,255,0.10) 0 1px, transparent 1px 4px);
+    }
+    .gif-export .scanlines { opacity: 0.02; }
+    .orb {
       position: absolute;
       border-radius: 999px;
-      filter: blur(100px);
+      filter: blur(90px);
+      opacity: 0.42;
     }
-    .glow::before {
-      left: 90px; top: 120px;
-      width: 520px; height: 280px;
-      background: rgba(110, 200, 255, 0.14);
-    }
-    .glow::after {
-      right: 140px; bottom: 160px;
-      width: 460px; height: 260px;
-      background: rgba(73, 197, 166, 0.12);
-    }
-    .gif-export .glow { opacity: 0.8; }
+    .gif-export .orb { filter: blur(70px); opacity: 0.28; }
+    .orb.a { width: 420px; height: 240px; left: 90px; top: 120px; background: rgba(121, 207, 255, 0.14); }
+    .orb.b { width: 340px; height: 220px; right: 160px; top: 190px; background: rgba(159, 143, 255, 0.12); }
+    .orb.c { width: 420px; height: 260px; right: 160px; bottom: 110px; background: rgba(87, 210, 178, 0.11); }
+    .orb.d { width: 300px; height: 220px; left: 420px; bottom: 120px; background: rgba(245, 193, 90, 0.08); }
 
     .eyebrow {
       position: absolute;
       left: 50%; top: 90px;
       transform: translateX(-50%);
       padding: 10px 16px;
-      border: 1px solid rgba(172, 209, 235, 0.14);
       border-radius: 999px;
-      background: rgba(7, 18, 28, 0.64);
-      color: rgba(193, 217, 235, 0.8);
+      border: 1px solid rgba(184, 213, 239, 0.14);
+      background: rgba(8, 18, 28, 0.64);
+      color: rgba(208, 223, 236, 0.84);
       font: 600 15px/1 var(--mono);
       letter-spacing: 0.14em;
       text-transform: uppercase;
-      box-shadow: 0 18px 48px rgba(0,0,0,0.24);
       opacity: 0;
+      box-shadow: 0 18px 44px rgba(0,0,0,0.22);
     }
-    .hero-word {
+    .title {
       position: absolute;
-      left: 50%; top: 350px;
+      left: 50%; top: 328px;
       transform: translate(-50%, -50%);
-      font-size: 118px;
-      font-weight: 760;
+      font-size: 124px;
+      font-weight: 770;
       letter-spacing: -0.065em;
       color: var(--ink);
-      text-shadow: 0 0 44px rgba(110, 200, 255, 0.12);
       white-space: nowrap;
       opacity: 0;
+      text-shadow: 0 0 40px rgba(121, 207, 255, 0.10);
     }
-    .hero-word .accent {
-      color: var(--teal);
-      text-shadow: 0 0 36px rgba(73, 197, 166, 0.18);
+    .title .accent {
+      background: linear-gradient(90deg, #e4fbff 0%, #8dd9ff 28%, #61d7c2 68%, #f0c765 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      text-shadow: none;
     }
-    .hero-sub {
+    .subtitle {
       position: absolute;
-      left: 50%; top: 490px;
-      width: 1160px;
+      left: 50%; top: 470px;
+      width: 1120px;
       transform: translateX(-50%);
       text-align: center;
       color: var(--soft);
-      font-size: 30px;
+      font-size: 29px;
       line-height: 1.38;
       letter-spacing: -0.02em;
       opacity: 0;
     }
 
-    .scene {
+    .field {
       position: absolute;
-      left: 50%; top: 188px;
-      width: 1500px; height: 740px;
+      left: 50%; top: 180px;
+      width: 1560px; height: 760px;
       transform: translateX(-50%);
       opacity: 0;
     }
-    .scene-main {
+    .ring-core {
       position: absolute;
-      left: 210px; top: 44px;
-      width: 1080px;
-      border-radius: 22px;
-      overflow: hidden;
-      background: var(--panel);
-      border: 1px solid rgba(177, 214, 239, 0.12);
-      box-shadow: 0 36px 110px rgba(0,0,0,0.36);
+      left: 50%; top: 270px;
+      width: 660px; height: 660px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      border: 1px solid rgba(166, 205, 231, 0.18);
+      box-shadow: inset 0 0 54px rgba(100, 170, 220, 0.06), 0 0 80px rgba(43, 101, 151, 0.12);
     }
-    .scene-main img {
-      display: block;
-      width: 100%; height: auto;
-    }
-    .shot-label {
+    .gif-export .ring-core { box-shadow: inset 0 0 32px rgba(100, 170, 220, 0.05); }
+    .ring-core::before,
+    .ring-core::after {
+      content: "";
       position: absolute;
-      left: 28px; top: 22px;
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
+      inset: 34px;
+      border-radius: 50%;
+      border: 1px solid rgba(119, 182, 230, 0.12);
+    }
+    .ring-core::after {
+      inset: 108px;
+      border-color: rgba(87, 210, 178, 0.14);
+    }
+    .pulse {
+      position: absolute;
+      left: 50%; top: 270px;
+      width: 160px; height: 160px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(121,207,255,0.24) 0%, rgba(87,210,178,0.14) 42%, rgba(87,210,178,0.02) 68%, transparent 76%);
+      box-shadow: 0 0 60px rgba(121,207,255,0.18);
+    }
+    .gif-export .pulse { box-shadow: 0 0 36px rgba(121,207,255,0.12); }
+    .path {
+      position: absolute;
+      left: 0; top: 0;
+      width: 100%; height: 100%;
+    }
+    .path svg { width: 100%; height: 100%; overflow: visible; }
+    .path line, .path path {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .flow-blue { stroke: rgba(121, 207, 255, 0.88); }
+    .flow-teal { stroke: rgba(87, 210, 178, 0.90); }
+    .flow-amber { stroke: rgba(245, 193, 90, 0.84); }
+    .flow-muted { stroke: rgba(146, 174, 198, 0.44); }
+    .chips {
+      position: absolute;
+      inset: 0;
+    }
+    .chip {
+      position: absolute;
+      padding: 9px 12px;
       border-radius: 999px;
-      border: 1px solid rgba(184, 220, 241, 0.15);
-      background: rgba(9, 18, 28, 0.76);
-      color: rgba(217, 231, 245, 0.92);
-      font: 700 12px/1 var(--mono);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      z-index: 2;
+      border: 1px solid rgba(171, 205, 230, 0.14);
+      background: rgba(9, 20, 31, 0.82);
+      color: rgba(232, 242, 251, 0.96);
+      font: 600 14px/1 var(--mono);
+      letter-spacing: 0.05em;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.18);
+      white-space: nowrap;
     }
-    .shot-label .dot {
-      width: 9px; height: 9px;
-      border-radius: 999px;
-      background: var(--teal);
-      box-shadow: 0 0 16px rgba(73, 197, 166, 0.55);
+    .chip small {
+      color: var(--muted);
+      font-size: 11px;
+      margin-left: 8px;
+      letter-spacing: 0.04em;
     }
-    .pill-col {
+    .node {
       position: absolute;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      width: 260px;
-    }
-    .pill-col.left { left: 0; top: 130px; }
-    .pill-col.right { right: 0; top: 140px; }
-    .pill {
+      width: 210px;
       padding: 16px 18px;
       border-radius: 18px;
-      border: 1px solid rgba(168, 202, 228, 0.12);
-      background: rgba(9, 18, 27, 0.82);
+      border: 1px solid rgba(171, 205, 230, 0.12);
+      background: rgba(8, 18, 28, 0.82);
       box-shadow: 0 18px 48px rgba(0,0,0,0.22);
     }
-    .pill b {
+    .node b {
       display: block;
-      color: rgba(240, 247, 255, 0.96);
-      font-size: 16px;
+      font-size: 14px;
       font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 6px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: rgba(241, 247, 255, 0.94);
+      margin-bottom: 8px;
     }
-    .pill span {
+    .node span {
       display: block;
       color: var(--soft);
       font-size: 13px;
       line-height: 1.42;
     }
-    .metric-strip {
+    .node.blue { box-shadow: 0 18px 48px rgba(0,0,0,0.22), 0 0 0 1px rgba(121,207,255,0.06) inset; }
+    .node.teal { box-shadow: 0 18px 48px rgba(0,0,0,0.22), 0 0 0 1px rgba(87,210,178,0.06) inset; }
+    .node.amber { box-shadow: 0 18px 48px rgba(0,0,0,0.22), 0 0 0 1px rgba(245,193,90,0.06) inset; }
+    .stream-label {
       position: absolute;
-      left: 310px;
-      bottom: 0;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 14px;
-      width: 920px;
+      top: 36px;
+      padding: 11px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(184, 213, 239, 0.14);
+      background: rgba(8, 18, 28, 0.68);
+      color: rgba(222, 235, 245, 0.92);
+      font: 600 13px/1 var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
-    .metric {
-      padding: 18px 20px;
-      border-radius: 18px;
-      border: 1px solid rgba(168, 202, 228, 0.12);
-      background: rgba(9, 18, 27, 0.82);
-      box-shadow: 0 18px 48px rgba(0,0,0,0.22);
+    .stream-label.left { left: 140px; }
+    .stream-label.right { right: 140px; }
+
+    .report {
+      position: absolute;
+      left: 50%; top: 166px;
+      width: 1340px; height: 770px;
+      transform: translateX(-50%);
+      opacity: 0;
     }
-    .metric b {
+    .report-shell {
+      position: absolute;
+      inset: 0;
+      border-radius: 28px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(11, 22, 33, 0.98) 0%, rgba(7, 15, 24, 0.98) 100%);
+      border: 1px solid rgba(183, 216, 237, 0.14);
+      box-shadow: 0 40px 120px rgba(0,0,0,0.36);
+    }
+    .report-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid rgba(171, 205, 230, 0.10);
+    }
+    .report-title b {
       display: block;
-      color: rgba(239, 247, 255, 0.94);
+      color: rgba(245, 250, 255, 0.96);
+      font-size: 28px;
+      font-weight: 760;
+      letter-spacing: -0.03em;
+    }
+    .report-title span {
+      display: block;
+      margin-top: 7px;
+      color: var(--soft);
+      font-size: 14px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+    .report-pillbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: 540px;
+    }
+    .rpill {
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(171, 205, 230, 0.12);
+      background: rgba(255,255,255,0.03);
+      color: rgba(230, 240, 249, 0.92);
+      font: 600 12px/1 var(--mono);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .report-grid {
+      display: grid;
+      grid-template-columns: 1.18fr 0.82fr;
+      gap: 18px;
+      padding: 20px 24px 24px;
+      height: calc(100% - 92px);
+    }
+    .panel {
+      border-radius: 22px;
+      border: 1px solid rgba(171, 205, 230, 0.10);
+      background: rgba(255,255,255,0.025);
+      padding: 18px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 32%);
+      pointer-events: none;
+    }
+    .panel h3 {
+      margin: 0 0 14px;
       font-size: 14px;
       font-weight: 700;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      margin-bottom: 7px;
+      color: rgba(231, 241, 250, 0.94);
     }
-    .metric span {
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .sbox {
+      padding: 14px 14px 12px;
+      border-radius: 16px;
+      background: rgba(6, 15, 24, 0.82);
+      border: 1px solid rgba(171, 205, 230, 0.10);
+    }
+    .sbox b {
+      display: block;
+      color: rgba(239, 247, 255, 0.96);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .sbox span {
+      display: block;
       color: var(--soft);
-      font-size: 13px;
-      line-height: 1.4;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
     }
-    .footer-note {
-      position: absolute;
-      left: 50%; bottom: 58px;
-      transform: translateX(-50%);
-      width: 1120px;
-      text-align: center;
-      color: rgba(194, 216, 233, 0.78);
+    .sbox span.teal { color: #8ee1cd; }
+    .sbox span.amber { color: #f3d184; }
+    .sbox span.blue { color: #a8e2ff; }
+    .copy {
+      display: grid;
+      gap: 10px;
+    }
+    .copy p {
+      margin: 0;
+      color: rgba(214, 229, 242, 0.88);
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    .mini-chart {
+      height: 130px;
+      margin-top: 16px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(7, 15, 24, 0.92), rgba(7, 15, 24, 0.72));
+      border: 1px solid rgba(171, 205, 230, 0.08);
+      overflow: hidden;
+      position: relative;
+    }
+    .mini-chart svg { width: 100%; height: 100%; }
+    .stack {
+      display: grid;
+      gap: 14px;
+    }
+    .artifact-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .artifact {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 14px;
+      border-radius: 14px;
+      background: rgba(6, 15, 24, 0.82);
+      border: 1px solid rgba(171, 205, 230, 0.10);
+    }
+    .artifact b {
+      color: rgba(239, 247, 255, 0.96);
+      font-size: 13px;
+      letter-spacing: 0.04em;
+    }
+    .artifact span {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+    .footer-band {
+      top: auto;
+      bottom: 42px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      color: rgba(213, 228, 244, 0.8);
       font-size: 17px;
       letter-spacing: -0.01em;
       opacity: 0;
     }
-    .footer-note strong { color: rgba(244, 250, 255, 0.96); }
+    .footer-band strong { color: rgba(246, 250, 255, 0.98); }
   </style>
 </head>
 <body>
   <div class="stage" id="stage">
     <div class="noise"></div>
     <div class="grid"></div>
-    <div class="glow"></div>
+    <div class="scanlines"></div>
+    <div class="orbs">
+      <div class="orb a"></div>
+      <div class="orb b"></div>
+      <div class="orb c"></div>
+      <div class="orb d"></div>
+    </div>
 
     <div class="eyebrow" id="eyebrow">LOCAL-FIRST · MULTI-AGENT · RESEARCH CONTEXT</div>
-    <div class="hero-word" id="heroWord">Investment <span class="accent">Research Desk</span></div>
-    <div class="hero-sub" id="heroSub">A local CLI workflow for equities and crypto — from analyst orchestration to bull / bear debate, final context, and audit-friendly run artifacts.</div>
+    <div class="title" id="title">Investment <span class="accent">Research Desk</span></div>
+    <div class="subtitle" id="subtitle">A cinematic local workflow for equities and crypto — where market signals, macro context, sentiment, and bull / bear reasoning converge into inspectable research artifacts.</div>
 
-    <section class="scene" id="sceneA">
-      <div class="scene-main" id="mainA">
-        <div class="shot-label"><span class="dot"></span> Guided research setup</div>
-        <img src="screenshots/cli-interactive-menu.png" alt="Interactive CLI workflow" />
+    <section class="field" id="field">
+      <div class="stream-label left">Signal field</div>
+      <div class="stream-label right">Macro · Sentiment · Technical</div>
+      <div class="ring-core" id="ring"></div>
+      <div class="pulse" id="pulse"></div>
+      <div class="path" id="paths">
+        <svg viewBox="0 0 1560 760" aria-hidden="true">
+          <path class="flow-muted" id="guide1" d="M184 260 C360 244, 468 156, 668 214 C790 248, 840 320, 884 356 C984 438, 1118 440, 1350 280" stroke-width="1.5" opacity="0.32" />
+          <path class="flow-muted" id="guide2" d="M164 470 C344 478, 440 560, 642 524 C784 496, 850 416, 918 388 C1030 334, 1160 336, 1378 496" stroke-width="1.5" opacity="0.28" />
+          <path class="flow-blue" id="pathBlue" d="M140 282 C352 252, 456 164, 666 226 C804 268, 862 358, 928 390 C1028 438, 1160 422, 1412 270" stroke-width="5.5" opacity="0.94" />
+          <path class="flow-teal" id="pathTeal" d="M120 516 C336 520, 462 584, 658 530 C798 492, 892 404, 960 374 C1060 330, 1186 344, 1416 484" stroke-width="6" opacity="0.95" />
+          <path class="flow-amber" id="pathAmber" d="M198 164 C392 202, 512 298, 694 336 C826 362, 924 326, 1026 236 C1114 160, 1220 124, 1362 138" stroke-width="4.5" opacity="0.84" />
+          <path class="flow-amber" id="pathAmber2" d="M240 618 C408 594, 526 502, 708 454 C846 416, 956 448, 1070 530 C1158 594, 1246 624, 1360 614" stroke-width="4.2" opacity="0.78" />
+        </svg>
       </div>
-      <div class="pill-col left">
-        <div class="pill"><b>CLI-first workflow</b><span>Choose the symbol, horizon, research depth, and language before the workflow starts.</span></div>
-        <div class="pill"><b>Multi-asset scope</b><span>Designed for equities and crypto contracts in the same local research flow.</span></div>
+      <div class="chips" id="chips">
+        <div class="chip" style="left: 110px; top: 222px;">SPY <small>macro beta</small></div>
+        <div class="chip" style="left: 210px; top: 502px;">ETH-USDT-SWAP <small>perps</small></div>
+        <div class="chip" style="left: 496px; top: 108px;">funding <small>OKX</small></div>
+        <div class="chip" style="left: 852px; top: 120px;">CPI pulse <small>macro</small></div>
+        <div class="chip" style="left: 1120px; top: 220px;">bull / bear <small>debate</small></div>
+        <div class="chip" style="left: 1070px; top: 540px;">trace.json <small>artifacts</small></div>
+        <div class="chip" style="left: 720px; top: 592px;">metrics <small>inspectable</small></div>
       </div>
-      <div class="pill-col right">
-        <div class="pill"><b>Exact run contract</b><span>Review mode, symbol, asset class, provider, and model before execution.</span></div>
-        <div class="pill"><b>Human-review framing</b><span>Structured research context only — not trade execution or portfolio management.</span></div>
-      </div>
-      <div class="metric-strip">
-        <div class="metric"><b>Run Controller</b><span>Standardizes inputs and prepares the workflow state.</span></div>
-        <div class="metric"><b>Analyst Team</b><span>Fundamental, news, sentiment, and technical specialists.</span></div>
-        <div class="metric"><b>Debate Layer</b><span>Bull vs. bear arguments before the final report.</span></div>
-        <div class="metric"><b>Artifacts</b><span>Runs write briefs, traces, metrics, and JSON outputs for review.</span></div>
+      <div class="node blue" id="nodeA" style="left: 248px; top: 150px;"><b>Technical state</b><span>Trend, volatility, support / resistance, and order-flow context enter the same local research surface.</span></div>
+      <div class="node teal" id="nodeB" style="left: 184px; top: 398px;"><b>News + sentiment</b><span>Signal fragments from headlines, Tavily, Reddit, and StockTwits are filtered before they matter.</span></div>
+      <div class="node amber" id="nodeC" style="right: 214px; top: 156px;"><b>Macro regime</b><span>Rates, yields, CPI, and cross-asset pressure shape the scene without turning the workflow into a trading bot.</span></div>
+      <div class="node teal" id="nodeD" style="right: 170px; top: 432px;"><b>Research convergence</b><span>Multiple agents and opposing arguments compress into a human-reviewable context package.</span></div>
+    </section>
+
+    <section class="report" id="report">
+      <div class="report-shell">
+        <div class="report-head">
+          <div class="report-title">
+            <b>Final Research Context</b>
+            <span>Inspectability over impulse · Local workflow over opaque chat</span>
+          </div>
+          <div class="report-pillbar">
+            <div class="rpill">equities + crypto</div>
+            <div class="rpill">langgraph orchestration</div>
+            <div class="rpill">bull / bear debate</div>
+            <div class="rpill">runs / trace / metrics</div>
+          </div>
+        </div>
+        <div class="report-grid">
+          <div class="panel">
+            <h3>Research output shape</h3>
+            <div class="summary-grid">
+              <div class="sbox"><b>Directional view</b><span class="teal">neutral → bullish</span></div>
+              <div class="sbox"><b>Risk level</b><span class="amber">elevated but bounded</span></div>
+              <div class="sbox"><b>Confidence</b><span class="blue">evidence-weighted</span></div>
+              <div class="sbox"><b>Regime</b><span>range-bound macro stress</span></div>
+            </div>
+            <div class="copy">
+              <p>The workflow is designed to feel like a local research desk rather than a one-shot prompt. Multiple analysts gather evidence, argument streams diverge, then the system compresses them into a final context object with explicit uncertainty.</p>
+              <p>Instead of pushing users toward action, the output stays at the level of <strong>research context</strong>: what is structurally supportive, what is conflicting, what needs monitoring, and what artifacts justify the view.</p>
+            </div>
+            <div class="mini-chart">
+              <svg viewBox="0 0 740 130" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="g1" x1="0" x2="1">
+                    <stop offset="0%" stop-color="rgba(121,207,255,0.18)" />
+                    <stop offset="100%" stop-color="rgba(121,207,255,0)" />
+                  </linearGradient>
+                  <linearGradient id="g2" x1="0" x2="1">
+                    <stop offset="0%" stop-color="rgba(87,210,178,0.18)" />
+                    <stop offset="100%" stop-color="rgba(87,210,178,0)" />
+                  </linearGradient>
+                </defs>
+                <path d="M0 90 C70 78, 118 44, 190 54 C276 68, 328 110, 402 98 C484 84, 520 42, 584 48 C660 56, 700 76, 740 58 L740 130 L0 130 Z" fill="url(#g1)" />
+                <path d="M0 104 C80 106, 128 82, 198 76 C280 70, 318 50, 388 60 C458 70, 506 104, 592 96 C662 90, 710 64, 740 62 L740 130 L0 130 Z" fill="url(#g2)" />
+                <path d="M0 90 C70 78, 118 44, 190 54 C276 68, 328 110, 402 98 C484 84, 520 42, 584 48 C660 56, 700 76, 740 58" fill="none" stroke="rgba(121,207,255,0.86)" stroke-width="3" stroke-linecap="round" />
+                <path d="M0 104 C80 106, 128 82, 198 76 C280 70, 318 50, 388 60 C458 70, 506 104, 592 96 C662 90, 710 64, 740 62" fill="none" stroke="rgba(87,210,178,0.90)" stroke-width="3" stroke-linecap="round" />
+              </svg>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="panel">
+              <h3>Run artifacts</h3>
+              <div class="artifact-list">
+                <div class="artifact"><b>final_research_context.json</b><span>core downstream object</span></div>
+                <div class="artifact"><b>final_market_context_cache.json</b><span>consumer-ready cache</span></div>
+                <div class="artifact"><b>research_brief.md</b><span>human-readable summary</span></div>
+                <div class="artifact"><b>trace.json</b><span>agent + tool visibility</span></div>
+                <div class="artifact"><b>metrics.json</b><span>runtime + compression telemetry</span></div>
+              </div>
+            </div>
+            <div class="panel">
+              <h3>Boundaries</h3>
+              <div class="copy">
+                <p><strong>Research context only.</strong> No order placement, no account access, no execution instruction, no portfolio action.</p>
+                <p>Optional sentiment LoRA lives on a separate WSL2 + CUDA path and only customizes the sentiment branch — not the entire report LLM.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
-    <section class="scene" id="sceneB">
-      <div class="scene-main" id="mainB">
-        <div class="shot-label"><span class="dot"></span> Live runtime visibility</div>
-        <img src="screenshots/cli-live-progress.png" alt="Live multi-agent progress" />
-      </div>
-      <div class="pill-col left">
-        <div class="pill"><b>Live progress board</b><span>See run control, analyst steps, debate, and report generation move in real time.</span></div>
-        <div class="pill"><b>Tool-aware execution</b><span>Each analyst stays inside its own data and tool boundary.</span></div>
-      </div>
-      <div class="pill-col right">
-        <div class="pill"><b>Traceable research</b><span>Messages, tool calls, and current report slices stay visible while the workflow runs.</span></div>
-        <div class="pill"><b>Stable local path</b><span>Sequential default for live Ollama runs; fixture and fake paths stay available for regression work.</span></div>
-      </div>
-      <div class="metric-strip">
-        <div class="metric"><b>Providers</b><span>OKX, Yahoo Finance, FMP, Finnhub, Tavily, Reddit, StockTwits, Jin10, and fixtures.</span></div>
-        <div class="metric"><b>Guardrails</b><span>Financial-scope queries, relevance filtering, and tool-call budgets are enforced.</span></div>
-        <div class="metric"><b>Metrics</b><span>Elapsed time, tool usage, and report progress are visible during the run.</span></div>
-        <div class="metric"><b>Resume</b><span>Checkpoint and run-artifact design support restartable local workflows.</span></div>
-      </div>
-    </section>
-
-    <section class="scene" id="sceneC">
-      <div class="scene-main" id="mainC">
-        <div class="shot-label"><span class="dot"></span> Final research context</div>
-        <img src="screenshots/cli-final-report.png" alt="Final research context report" />
-      </div>
-      <div class="pill-col left">
-        <div class="pill"><b>Structured output</b><span>Directional view, confidence, regime, risks, and analyst evidence are kept in one research package.</span></div>
-        <div class="pill"><b>Downstream-ready</b><span>Reports, metrics, trace, final context, and market context cache are written to the run directory.</span></div>
-      </div>
-      <div class="pill-col right">
-        <div class="pill"><b>Optional sentiment adapter</b><span>WSL2 + CUDA LoRA path customizes the sentiment analyst without replacing the whole pipeline.</span></div>
-        <div class="pill"><b>Research context only</b><span>No order placement, no account access, no portfolio actions, and no execution instructions.</span></div>
-      </div>
-      <div class="metric-strip">
-        <div class="metric"><b>Equities + Crypto</b><span>One local interface for stock and swap research workflows.</span></div>
-        <div class="metric"><b>LangGraph</b><span>State-driven orchestration instead of a loose chat-style agent loop.</span></div>
-        <div class="metric"><b>English + Chinese</b><span>Readable report modes for bilingual local research work.</span></div>
-        <div class="metric"><b>Inspectability</b><span>Built to be reviewed after the run, not only watched while it runs.</span></div>
-      </div>
-    </section>
-
-    <div class="footer-note" id="footerNote"><strong>Research context only.</strong> Built for human review, local experimentation, and inspectable multi-agent investment research.</div>
+    <div class="footer-band" id="footerBand"><strong>Research context only.</strong> Local-first, inspectable, and built for human review.</div>
   </div>
 
   <script>
-    const DURATION = 12;
+    const DURATION = 10.5;
     const stage = document.getElementById('stage');
-    const eyebrow = document.getElementById('eyebrow');
-    const heroWord = document.getElementById('heroWord');
-    const heroSub = document.getElementById('heroSub');
-    const sceneA = document.getElementById('sceneA');
-    const sceneB = document.getElementById('sceneB');
-    const sceneC = document.getElementById('sceneC');
-    const mainA = document.getElementById('mainA');
-    const mainB = document.getElementById('mainB');
-    const mainC = document.getElementById('mainC');
-    const footerNote = document.getElementById('footerNote');
-
     if (window.__gifExport) stage.classList.add('gif-export');
 
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
     const lerp = (a, b, t) => a + (b - a) * t;
     const easeOut = t => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+    const easeIn = t => Math.pow(clamp(t, 0, 1), 3);
     const easeInOut = t => {
       t = clamp(t, 0, 1);
       return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     };
     const between = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
 
-    function sceneVisibility(t, start, end) {
-      const fadeIn = easeOut(between(t, start, start + 0.8));
-      const fadeOut = 1 - easeInOut(between(t, end - 0.85, end));
-      return clamp(fadeIn * fadeOut, 0, 1);
-    }
+    const eyebrow = document.getElementById('eyebrow');
+    const title = document.getElementById('title');
+    const subtitle = document.getElementById('subtitle');
+    const field = document.getElementById('field');
+    const ring = document.getElementById('ring');
+    const pulse = document.getElementById('pulse');
+    const report = document.getElementById('report');
+    const footerBand = document.getElementById('footerBand');
+    const chips = [...document.querySelectorAll('.chip')];
+    const nodes = [...document.querySelectorAll('.node')];
+    const lines = {
+      blue: document.getElementById('pathBlue'),
+      teal: document.getElementById('pathTeal'),
+      amber: document.getElementById('pathAmber'),
+      amber2: document.getElementById('pathAmber2')
+    };
 
-    function sceneTransform(t, start, end, enterY, driftX) {
-      const vis = sceneVisibility(t, start, end);
-      const p = between(t, start, end);
-      const y = lerp(enterY, 0, easeOut(between(t, start, start + 0.9))) + lerp(0, -12, between(t, start + 1.2, end - 0.8));
-      const x = lerp(driftX, 0, easeOut(between(t, start, start + 0.9))) + lerp(0, driftX * -0.2, between(t, start + 1.4, end - 0.8));
-      return { vis, x, y, p };
+    const lengths = Object.fromEntries(Object.entries(lines).map(([k, el]) => [k, el.getTotalLength()]));
+    Object.entries(lines).forEach(([k, el]) => {
+      el.style.strokeDasharray = `${lengths[k]}`;
+      el.style.strokeDashoffset = `${lengths[k]}`;
+    });
+
+    function sceneOpacity(t, start, end, fade = 0.7) {
+      const inn = easeOut(between(t, start, start + fade));
+      const out = 1 - easeInOut(between(t, end - fade, end));
+      return clamp(inn * out, 0, 1);
     }
 
     function update(t) {
       t = ((t % DURATION) + DURATION) % DURATION;
 
-      const intro = easeOut(between(t, 0.15, 1.55));
-      const introHold = 1 - easeInOut(between(t, 2.05, 3.0));
-      const introOpacity = clamp(intro * introHold, 0, 1);
-      eyebrow.style.opacity = String(introOpacity);
-      eyebrow.style.transform = `translateX(-50%) translateY(${lerp(18, 0, intro)}px)`;
-      heroWord.style.opacity = String(introOpacity);
-      heroWord.style.transform = `translate(-50%, -50%) translateY(${lerp(40, 0, intro)}px) scale(${lerp(0.985, 1, intro)})`;
-      heroSub.style.opacity = String(introOpacity * 0.96);
-      heroSub.style.transform = `translateX(-50%) translateY(${lerp(32, 0, intro)}px)`;
+      const introIn = easeOut(between(t, 0.08, 1.22));
+      const introOut = 1 - easeInOut(between(t, 1.9, 2.7));
+      const intro = clamp(introIn * introOut, 0, 1);
+      eyebrow.style.opacity = intro.toFixed(3);
+      eyebrow.style.transform = `translateX(-50%) translateY(${lerp(18, 0, introIn)}px)`;
+      title.style.opacity = intro.toFixed(3);
+      title.style.transform = `translate(-50%, -50%) translateY(${lerp(40, 0, introIn)}px) scale(${lerp(0.985, 1, introIn)})`;
+      subtitle.style.opacity = (intro * 0.97).toFixed(3);
+      subtitle.style.transform = `translateX(-50%) translateY(${lerp(26, 0, introIn)}px)`;
 
-      const a = sceneTransform(t, 2.0, 5.2, 42, -12);
-      sceneA.style.opacity = String(a.vis);
-      sceneA.style.transform = `translateX(-50%) translate(${a.x}px, ${a.y}px)`;
-      mainA.style.transform = `scale(${lerp(0.98, 1, a.vis)}) rotate(${lerp(-0.6, 0, a.vis)}deg)`;
+      const fieldStart = 2.0, fieldEnd = 7.2;
+      const fieldVis = sceneOpacity(t, fieldStart, fieldEnd, 0.9);
+      field.style.opacity = fieldVis.toFixed(3);
+      field.style.transform = `translateX(-50%) translateY(${lerp(30, 0, easeOut(between(t, fieldStart, fieldStart + 1.0)))}px)`;
 
-      const b = sceneTransform(t, 4.8, 8.2, 44, 10);
-      sceneB.style.opacity = String(b.vis);
-      sceneB.style.transform = `translateX(-50%) translate(${b.x}px, ${b.y}px)`;
-      mainB.style.transform = `scale(${lerp(0.98, 1, b.vis)}) rotate(${lerp(0.5, 0, b.vis)}deg)`;
+      const ringGrow = easeOut(between(t, 2.1, 3.4));
+      const ringRotate = lerp(-8, 7, between(t, 3.0, 6.8));
+      ring.style.transform = `translate(-50%, -50%) scale(${lerp(0.82, 1.02, ringGrow)}) rotate(${ringRotate}deg)`;
+      pulse.style.transform = `translate(-50%, -50%) scale(${lerp(0.72, 1.18, 0.5 + 0.5 * Math.sin(t * 2.6))})`;
+      pulse.style.opacity = String(0.38 + 0.22 * Math.sin(t * 1.8 + 0.6));
 
-      const c = sceneTransform(t, 7.8, 11.7, 48, 0);
-      sceneC.style.opacity = String(c.vis);
-      sceneC.style.transform = `translateX(-50%) translate(${c.x}px, ${c.y}px)`;
-      mainC.style.transform = `scale(${lerp(0.978, 1, c.vis)}) rotate(${lerp(-0.3, 0, c.vis)}deg)`;
+      const drawBlue = easeOut(between(t, 2.2, 4.0));
+      const drawTeal = easeOut(between(t, 2.5, 4.4));
+      const drawAmber = easeOut(between(t, 3.0, 4.8));
+      lines.blue.style.strokeDashoffset = String(lengths.blue * (1 - drawBlue));
+      lines.teal.style.strokeDashoffset = String(lengths.teal * (1 - drawTeal));
+      lines.amber.style.strokeDashoffset = String(lengths.amber * (1 - drawAmber));
+      lines.amber2.style.strokeDashoffset = String(lengths.amber2 * (1 - drawAmber));
 
-      const footerIn = easeOut(between(t, 8.8, 10.2));
-      const footerOut = 1 - easeInOut(between(t, 11.45, 12.0));
+      chips.forEach((chip, i) => {
+        const start = 2.4 + i * 0.18;
+        const p = easeOut(between(t, start, start + 0.9));
+        const drift = window.__gifExport ? 0 : Math.sin(t * 0.8 + i) * 6;
+        chip.style.opacity = String(fieldVis * p);
+        chip.style.transform = `translate(${lerp(i % 2 === 0 ? -24 : 24, 0, p)}px, ${lerp(18, 0, p) + drift}px)`;
+      });
+      nodes.forEach((node, i) => {
+        const start = 3.5 + i * 0.24;
+        const p = easeOut(between(t, start, start + 0.95));
+        node.style.opacity = String(fieldVis * p);
+        node.style.transform = `translate(${lerp(i < 2 ? -20 : 20, 0, p)}px, ${lerp(24, 0, p)}px)`;
+      });
+
+      const reportStart = 6.4, reportEnd = 10.2;
+      const reportVis = sceneOpacity(t, reportStart, reportEnd, 0.85);
+      report.style.opacity = reportVis.toFixed(3);
+      report.style.transform = `translateX(-50%) translateY(${lerp(36, 0, easeOut(between(t, reportStart, reportStart + 0.9)))}px) scale(${lerp(0.985, 1, reportVis)})`;
+
+      const fieldFadeLate = 1 - easeInOut(between(t, 6.2, 7.2));
+      field.style.opacity = String(fieldVis * fieldFadeLate);
+
+      const footerIn = easeOut(between(t, 8.0, 9.2));
+      const footerOut = 1 - easeInOut(between(t, 10.0, 10.5));
       const footer = clamp(footerIn * footerOut, 0, 1);
-      footerNote.style.opacity = String(footer);
-      footerNote.style.transform = `translateX(-50%) translateY(${lerp(18, 0, footerIn)}px)`;
+      footerBand.style.opacity = footer.toFixed(3);
+      footerBand.style.transform = `translateY(${lerp(18, 0, footerIn)}px)`;
     }
 
     let start = performance.now();

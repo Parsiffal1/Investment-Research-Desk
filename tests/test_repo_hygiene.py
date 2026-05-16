@@ -48,6 +48,7 @@ def test_docs_index_pair_exists_and_links_to_core_docs():
 def test_hero_assets_exist():
     assert (DOCS_ROOT / "assets" / "investment-research-desk-hero.html").exists()
     assert (DOCS_ROOT / "assets" / "investment-research-desk-hero.gif").exists()
+    assert (REPO_ROOT / "scripts" / "render_true30_gif.cjs").exists()
 
 
 def test_readme_uses_sanitized_env_example_values():
