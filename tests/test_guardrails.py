@@ -7,6 +7,12 @@ def test_guardrail_allows_research_context_warning():
     assert find_guardrail_violations(text) == []
 
 
+def test_guardrail_allows_chinese_research_context_warning():
+    text = "仅作为投研上下文使用。该报告讨论市场风险和情景分析。"
+
+    assert find_guardrail_violations(text) == []
+
+
 def test_guardrail_blocks_trading_advice_language():
     text = "Buy now, place a buy order, and use 20% of your portfolio. Guaranteed profit."
 
@@ -14,4 +20,3 @@ def test_guardrail_blocks_trading_advice_language():
     assert "direct_buy" in violations
     assert "position_sizing" in violations
     assert "guaranteed_profit" in violations
-

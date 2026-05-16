@@ -979,9 +979,9 @@ def _print_console_report(state: dict) -> None:
                 [
                     (t["view"], _display_report_value(fundamental.get("fundamental_view"), language)),
                     (t["confidence"], fundamental.get("confidence")),
-                    (t["key_drivers"], _plain_list(fundamental.get("key_drivers"))),
-                    (t["concerns"], _plain_list(fundamental.get("concerns"))),
-                    (t["evidence"], _plain_list(fundamental.get("evidence"))),
+                    (t["key_drivers"], _plain_list(fundamental.get("key_drivers"), language)),
+                    (t["concerns"], _plain_list(fundamental.get("concerns"), language)),
+                    (t["evidence"], _plain_list(fundamental.get("evidence"), language)),
                 ],
             ),
             _agent_panel(
@@ -990,8 +990,8 @@ def _print_console_report(state: dict) -> None:
                     (t["impact_logic"], news.get("impact_logic")),
                     (t["confidence"], news.get("confidence")),
                     (t["asset_impact"], _display_report_value((news.get("asset_impact") or {}).get(final.symbol, "mixed"), language)),
-                    (t["dominant_events"], _plain_list(news.get("dominant_events"))),
-                    (t["evidence"], _plain_list(news.get("evidence"))),
+                    (t["dominant_events"], _plain_list(news.get("dominant_events"), language)),
+                    (t["evidence"], _plain_list(news.get("evidence"), language)),
                 ],
             ),
             _agent_panel(
@@ -1001,7 +1001,7 @@ def _print_console_report(state: dict) -> None:
                     (t["label"], _display_report_value(sentiment.get("sentiment_label"), language)),
                     (t["score"], sentiment.get("sentiment_score")),
                     (t["confidence"], sentiment.get("confidence")),
-                    (t["evidence"], _plain_list(sentiment.get("evidence"))),
+                    (t["evidence"], _plain_list(sentiment.get("evidence"), language)),
                 ],
             ),
             _agent_panel(
@@ -1012,24 +1012,24 @@ def _print_console_report(state: dict) -> None:
                     (t["momentum"], _display_report_value(technical.get("momentum"), language)),
                     (t["volatility"], _display_report_value(technical.get("volatility_regime"), language)),
                     ("RSI 14", technical.get("rsi_14")),
-                    ("MACD", technical.get("macd_state")),
+                    (t["macd_state"], _display_report_value(technical.get("macd_state"), language)),
                     ("ATR 14", technical.get("atr_14")),
-                    ("Realized Volatility", technical.get("realized_volatility")),
-                    ("Max Drawdown", technical.get("max_drawdown")),
-                    ("OKX Mark / Index", f"{technical.get('mark_price')} / {technical.get('index_price')}"),
-                    ("OKX Funding", technical.get("funding_rate")),
-                    ("OKX Open Interest", technical.get("open_interest")),
-                    ("Orderbook Imbalance", technical.get("orderbook_imbalance")),
-                    ("Support Zones", _plain_list(technical.get("support_zones"))),
-                    ("Resistance Zones", _plain_list(technical.get("resistance_zones"))),
+                    (t["realized_volatility"], technical.get("realized_volatility")),
+                    (t["max_drawdown"], technical.get("max_drawdown")),
+                    (t["okx_mark_index"], f"{technical.get('mark_price')} / {technical.get('index_price')}"),
+                    (t["okx_funding"], technical.get("funding_rate")),
+                    (t["okx_open_interest"], technical.get("open_interest")),
+                    (t["orderbook_imbalance"], technical.get("orderbook_imbalance")),
+                    (t["support_zones"], _plain_list(technical.get("support_zones"), language)),
+                    (t["resistance_zones"], _plain_list(technical.get("resistance_zones"), language)),
                 ],
             ),
             _agent_panel(
                 t["bull_title"],
                 [
                     (t["thesis"], constructive.get("thesis")),
-                    (t["evidence"], _plain_list(constructive.get("evidence"))),
-                    (t["conditions"], _plain_list(constructive.get("conditions"))),
+                    (t["evidence"], _plain_list(constructive.get("evidence"), language)),
+                    (t["conditions"], _plain_list(constructive.get("conditions"), language)),
                     (t["confidence"], constructive.get("confidence")),
                 ],
             ),
@@ -1037,8 +1037,8 @@ def _print_console_report(state: dict) -> None:
                 t["bear_title"],
                 [
                     (t["thesis"], risk.get("thesis")),
-                    (t["evidence"], _plain_list(risk.get("evidence"))),
-                    (t["conditions"], _plain_list(risk.get("conditions"))),
+                    (t["evidence"], _plain_list(risk.get("evidence"), language)),
+                    (t["conditions"], _plain_list(risk.get("conditions"), language)),
                     (t["confidence"], risk.get("confidence")),
                 ],
             ),
@@ -1049,39 +1049,39 @@ def _print_console_report(state: dict) -> None:
                     (t["news_summary"], final.news_impact_summary),
                     (t["sentiment_summary"], final.sentiment_summary),
                     (t["technical_summary"], final.technical_summary),
-                    (t["key_drivers"], _plain_list(final.key_drivers)),
-                    (t["key_risks"], _plain_list(final.key_risks)),
-                    (t["uncertainty"], _plain_list(final.uncertainty_factors)),
+                    (t["key_drivers"], _plain_list(final.key_drivers, language)),
+                    (t["key_risks"], _plain_list(final.key_risks, language)),
+                    (t["uncertainty"], _plain_list(final.uncertainty_factors, language)),
                 ],
             ),
             _agent_panel(
                 t["debate"],
                 [
-                    (t["points_agreement"], _plain_list(debate.get("points_of_agreement"))),
-                    (t["key_tensions"], _plain_list(debate.get("key_tensions"))),
-                    (t["evidence_quality"], _plain_list(debate.get("evidence_quality_notes"))),
-                    (t["reporter_handoff"], debate.get("reporter_handoff")),
+                    (t["points_agreement"], _plain_list(debate.get("points_of_agreement"), language)),
+                    (t["key_tensions"], _plain_list(debate.get("key_tensions"), language)),
+                    (t["evidence_quality"], _plain_list(debate.get("evidence_quality_notes"), language)),
+                    (t["reporter_handoff"], debate.get("reporter_handoff") or _display_none(language)),
                 ],
             ),
             _agent_panel(
                 t["data_metadata"],
                 [
                     (t["ohlcv_bars"], len(data.get("ohlcv") or [])),
-                    (t["market_context_sections"], ", ".join((data.get("market_context") or {}).keys()) or "None"),
+                    (t["market_context_sections"], ", ".join((data.get("market_context") or {}).keys()) or _display_none(language)),
                     (t["news_events"], len(data.get("news_events") or [])),
                     (t["sentiment_inputs"], len(data.get("sentiment_inputs") or [])),
                     (t["provider_mode"], (data.get("source_metadata") or {}).get("provider_mode", "unknown")),
                     (t["tool_policy"], (data.get("source_metadata") or {}).get("tool_call_policy", "unknown")),
                     (t["agent_execution"], (data.get("source_metadata") or {}).get("agent_execution_mode", "unknown")),
-                    (t["provider_warnings"], _plain_list((data.get("source_metadata") or {}).get("agent_tool_warnings"))),
+                    (t["provider_warnings"], _plain_list((data.get("source_metadata") or {}).get("agent_tool_warnings"), language)),
                     (t["sentiment_runtime"], (data.get("source_metadata") or {}).get("sentiment_runtime", "main")),
-                    (t["guardrail_violations"], ", ".join(metrics.get("guardrail_violations") or []) or "None"),
+                    (t["guardrail_violations"], ", ".join(metrics.get("guardrail_violations") or []) or _display_none(language)),
                 ],
             ),
             _agent_panel(
                 t["usage_boundary"],
                 [
-                    (t["constraints"], _plain_list(final.usage_constraints)),
+                    (t["constraints"], _plain_list(final.usage_constraints, language)),
                     (t["downstream"], final.downstream_agent_context),
                 ],
             ),
@@ -1120,6 +1120,15 @@ def _report_labels(language: str) -> dict[str, str]:
             "trend": "趋势",
             "momentum": "动量",
             "volatility": "波动状态",
+            "macd_state": "MACD状态",
+            "realized_volatility": "实现波动率",
+            "max_drawdown": "最大回撤",
+            "okx_mark_index": "OKX标记/指数",
+            "okx_funding": "OKX资金费率",
+            "okx_open_interest": "OKX未平仓量",
+            "orderbook_imbalance": "订单簿不平衡",
+            "support_zones": "支撑区",
+            "resistance_zones": "阻力区",
             "thesis": "核心论点",
             "conditions": "成立条件",
             "research_reporter": "最终研究报告",
@@ -1179,6 +1188,15 @@ def _report_labels(language: str) -> dict[str, str]:
         "trend": "Trend",
         "momentum": "Momentum",
         "volatility": "Volatility",
+        "macd_state": "MACD",
+        "realized_volatility": "Realized Volatility",
+        "max_drawdown": "Max Drawdown",
+        "okx_mark_index": "OKX Mark / Index",
+        "okx_funding": "OKX Funding",
+        "okx_open_interest": "OKX Open Interest",
+        "orderbook_imbalance": "Orderbook Imbalance",
+        "support_zones": "Support Zones",
+        "resistance_zones": "Resistance Zones",
         "thesis": "Thesis",
         "conditions": "Conditions",
         "research_reporter": "Research Reporter",
@@ -1220,11 +1238,11 @@ def _agent_panel(title: str, rows: list[tuple[str, Any]]) -> Panel:
     return Panel(table, title=title, border_style="green")
 
 
-def _plain_list(items: Any) -> str:
+def _plain_list(items: Any, language: str = "en") -> str:
     if not items:
-        return "None"
+        return _display_none(language)
     if isinstance(items, list):
-        return "\n".join(f"- {item}" for item in items) if items else "None"
+        return "\n".join(f"- {item}" for item in items) if items else _display_none(language)
     return str(items)
 
 
@@ -1277,8 +1295,22 @@ def _display_report_value(value: Any, language: str) -> str:
         "sideways": "震荡",
         "positive": "正向",
         "negative": "负向",
+        "normal": "正常",
+        "None": "无",
+        "none": "无",
+        "fixture": "固定样例",
+        "live": "实时",
+        "parallel": "并行",
+        "sequential": "序列",
+        "main": "主模型",
+        "fixture_data_scoped_to_agent_contract": "固定样例数据按Agent契约隔离",
+        "tradingagents_style_llm_tool_loop": "TradingAgents风格LLM工具循环",
     }
     return mapping.get(text, text)
+
+
+def _display_none(language: str) -> str:
+    return "无" if language == "zh" else "None"
 
 
 def _print_artifact_contract(state: dict) -> None:

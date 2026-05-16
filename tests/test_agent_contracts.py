@@ -50,14 +50,16 @@ def test_agent_data_scopes_do_not_expose_unrelated_inputs():
     assert technical.ohlcv
     assert technical.news_events == []
     assert technical.sentiment_inputs == []
-    assert technical.source_metadata == {}
+    assert set(technical.source_metadata) <= {"language"}
 
     sentiment = ResearchWorkflow._scope_data(data, "sentiment")
     assert sentiment.sentiment_inputs
     assert sentiment.ohlcv == []
     assert sentiment.news_events == []
+    assert set(sentiment.source_metadata) <= {"language"}
 
     news = ResearchWorkflow._scope_data(data, "news_impact")
     assert news.news_events
     assert news.ohlcv == []
     assert news.sentiment_inputs == []
+    assert set(news.source_metadata) <= {"language"}

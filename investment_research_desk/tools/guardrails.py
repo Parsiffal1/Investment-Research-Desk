@@ -15,11 +15,16 @@ PROHIBITED_PATTERNS = {
 }
 
 
-REQUIRED_WARNING = "Use as research context only"
+REQUIRED_WARNING_PHRASES = (
+    "Use as research context only",
+    "仅作投研上下文",
+    "仅作为投研上下文",
+)
 
 
 def find_guardrail_violations(text: str) -> list[str]:
     violations = [name for name, pattern in PROHIBITED_PATTERNS.items() if pattern.search(text)]
-    if REQUIRED_WARNING.lower() not in text.lower():
+    lowered = text.lower()
+    if not any(phrase.lower() in lowered for phrase in REQUIRED_WARNING_PHRASES):
         violations.append("missing_downstream_usage_warning")
     return violations

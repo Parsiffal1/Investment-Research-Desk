@@ -557,6 +557,7 @@ class ResearchWorkflow:
             "tool_loop_timeout": collected["timeout"],
             "tool_loop_timeout_detail": collected["timeout_detail"],
             "retained_partial_evidence": _retained_evidence_count(collected),
+            "language": request.language,
             **collected["source_metadata"],
         }
         return NormalizedData(
@@ -679,6 +680,7 @@ class ResearchWorkflow:
                 market_context={"okx_swap": swap_context_result.data} if swap_context_result.data else {},
                 source_metadata={
                     "provider_mode": "live",
+                    "language": request.language,
                     "tool_call_policy": "agent_called_allowed_tools",
                     "agent_tool_status": {
                         agent_name: {
@@ -698,6 +700,7 @@ class ResearchWorkflow:
                 news_events=news_result.data,
                 source_metadata={
                     "provider_mode": "live",
+                    "language": request.language,
                     "tool_call_policy": "agent_called_allowed_tools",
                     "agent_tool_status": {agent_name: {"get_news": news_result.status}},
                     "warnings": news_result.warnings,
@@ -712,6 +715,7 @@ class ResearchWorkflow:
                 sentiment_inputs=sentiment_result.data,
                 source_metadata={
                     "provider_mode": "live",
+                    "language": request.language,
                     "tool_call_policy": "agent_called_allowed_tools",
                     "agent_tool_status": {agent_name: {"get_sentiment_inputs": sentiment_result.status}},
                     "warnings": sentiment_result.warnings,
@@ -728,6 +732,7 @@ class ResearchWorkflow:
                 news_events=news_result.data,
                 source_metadata={
                     "provider_mode": "live",
+                    "language": request.language,
                     "tool_call_policy": "agent_called_allowed_tools",
                     "agent_tool_status": {
                         agent_name: {
@@ -749,7 +754,7 @@ class ResearchWorkflow:
             news = NewsImpactResult.model_validate(s["news"])
             sentiment = SentimentResult.model_validate(s["sentiment"])
             technical = TechnicalState.model_validate(s["technical"])
-            constructive = ConstructiveCaseAnalyst().run(fundamental, news, sentiment, technical, llm)
+            constructive = ConstructiveCaseAnalyst().run(fundamental, news, sentiment, technical, llm, language=request.language)
             s["constructive"] = constructive.model_dump(mode="json")
             self._write_bull_risk_outputs(s)
             return s
@@ -765,7 +770,7 @@ class ResearchWorkflow:
             sentiment = SentimentResult.model_validate(s["sentiment"])
             technical = TechnicalState.model_validate(s["technical"])
             constructive = ResearchCase.model_validate(s["constructive"])
-            risk = RiskCaseAnalyst().run(fundamental, news, sentiment, technical, constructive, llm)
+            risk = RiskCaseAnalyst().run(fundamental, news, sentiment, technical, constructive, llm, language=request.language)
             s["risk"] = risk.model_dump(mode="json")
             self._write_bull_risk_outputs(s)
             return s
@@ -798,6 +803,7 @@ class ResearchWorkflow:
                     llm,
                     debate_history=debate_rounds,
                     opponent_case=risk,
+                    language=request.language,
                 )
                 self._append_trace(
                     s,
@@ -826,6 +832,7 @@ class ResearchWorkflow:
                     constructive,
                     llm,
                     debate_history=debate_rounds,
+                    language=request.language,
                 )
                 self._append_trace(
                     s,
@@ -846,7 +853,7 @@ class ResearchWorkflow:
             s["constructive"] = constructive.model_dump(mode="json")
             s["risk"] = risk.model_dump(mode="json")
             self._write_bull_risk_outputs(s)
-            moderation = DebateModerator().run(constructive, risk, llm)
+            moderation = DebateModerator().run(constructive, risk, llm, language=request.language)
             debate = {
                 "team": "Bull/Bear Research Debate",
                 "contract": get_agent_contract("bull_bear_research_debate").model_dump(mode="json"),
@@ -1140,7 +1147,7 @@ class ResearchWorkflow:
     @staticmethod
     def _scope_data(data: NormalizedData, agent_name: str) -> NormalizedData:
         if agent_name == "fundamental_macro":
-            metadata_keys = {"fmp_profile", "fmp_quote", "finnhub_quote", "source_status", "provider_mode"}
+            metadata_keys = {"fmp_profile", "fmp_quote", "finnhub_quote", "source_status", "provider_mode", "language"}
             return NormalizedData(
                 symbol=data.symbol,
                 asset_class=data.asset_class,
@@ -1154,6 +1161,7 @@ class ResearchWorkflow:
                 asset_class=data.asset_class,
                 horizon=data.horizon,
                 news_events=data.news_events,
+                source_metadata={"language": data.source_metadata.get("language", "en")},
             )
         if agent_name == "sentiment":
             return NormalizedData(
@@ -1161,6 +1169,7 @@ class ResearchWorkflow:
                 asset_class=data.asset_class,
                 horizon=data.horizon,
                 sentiment_inputs=data.sentiment_inputs,
+                source_metadata={"language": data.source_metadata.get("language", "en")},
             )
         if agent_name == "technical":
             return NormalizedData(
@@ -1169,6 +1178,7 @@ class ResearchWorkflow:
                 horizon=data.horizon,
                 ohlcv=data.ohlcv,
                 market_context=data.market_context,
+                source_metadata={"language": data.source_metadata.get("language", "en")},
             )
         raise ValueError(f"No data scope registered for agent {agent_name}")
 
@@ -1253,76 +1263,76 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"## {h['fundamental_title']}\n"
             f"- {h['view']}: {_report_value(fundamental.fundamental_view, language)}\n"
             f"- {h['confidence']}: {fundamental.confidence}\n\n"
-            f"### {h['key_drivers']}\n{_md_list(fundamental.key_drivers)}\n\n"
-            f"### {h['concerns']}\n{_md_list(fundamental.concerns)}\n\n"
-            f"### {h['evidence']}\n{_md_list(fundamental.evidence)}",
+            f"### {h['key_drivers']}\n{_md_list(fundamental.key_drivers, language)}\n\n"
+            f"### {h['concerns']}\n{_md_list(fundamental.concerns, language)}\n\n"
+            f"### {h['evidence']}\n{_md_list(fundamental.evidence, language)}",
             f"## {h['news_title']}\n"
             f"- {h['impact_logic']}: {news.impact_logic}\n"
             f"- {h['confidence']}: {news.confidence}\n"
             f"- {h['asset_impact']}: {_report_value(news.asset_impact.get(final.symbol, 'mixed'), language)}\n\n"
-            f"### {h['dominant_events']}\n{_md_list(news.dominant_events)}\n\n"
-            f"### {h['evidence']}\n{_md_list(news.evidence)}",
+            f"### {h['dominant_events']}\n{_md_list(news.dominant_events, language)}\n\n"
+            f"### {h['evidence']}\n{_md_list(news.evidence, language)}",
             f"## {h['sentiment_title']}\n"
             f"- {h['crowd_mood']}: {sentiment.crowd_mood}\n"
             f"- {h['label']}: {_report_value(sentiment.sentiment_label, language)}\n"
             f"- {h['score']}: {sentiment.sentiment_score}\n"
             f"- {h['confidence']}: {sentiment.confidence}\n\n"
-            f"### {h['evidence']}\n{_md_list(sentiment.evidence)}",
+            f"### {h['evidence']}\n{_md_list(sentiment.evidence, language)}",
             f"## {h['technical_title']}\n"
             f"- {h['view']}: {_report_value(technical.technical_view, language)}\n"
             f"- {h['trend']}: {_report_value(technical.trend, language)}\n"
             f"- {h['momentum']}: {_report_value(technical.momentum, language)}\n"
             f"- {h['volatility_regime']}: {_report_value(technical.volatility_regime, language)}\n"
             f"- RSI 14: {technical.rsi_14}\n"
-            f"- MACD state: {technical.macd_state}\n"
+            f"- {h['macd_state']}: {_report_value(technical.macd_state, language)}\n"
             f"- ATR 14: {technical.atr_14}\n"
-            f"- Realized volatility: {technical.realized_volatility}\n"
-            f"- Max drawdown: {technical.max_drawdown}\n"
-            f"- OKX mark price: {technical.mark_price}\n"
-            f"- OKX index price: {technical.index_price}\n"
-            f"- OKX funding rate: {technical.funding_rate}\n"
-            f"- OKX open interest: {technical.open_interest}\n"
-            f"- OKX orderbook imbalance: {technical.orderbook_imbalance}\n"
-            f"- SWAP context: {technical.swap_context_summary or 'None'}\n"
-            f"- Support zones: {', '.join(map(str, technical.support_zones)) or 'None'}\n"
-            f"- Resistance zones: {', '.join(map(str, technical.resistance_zones)) or 'None'}\n"
+            f"- {h['realized_volatility']}: {technical.realized_volatility}\n"
+            f"- {h['max_drawdown']}: {technical.max_drawdown}\n"
+            f"- {h['okx_mark_price']}: {_report_value(technical.mark_price, language)}\n"
+            f"- {h['okx_index_price']}: {_report_value(technical.index_price, language)}\n"
+            f"- {h['okx_funding_rate']}: {_report_value(technical.funding_rate, language)}\n"
+            f"- {h['okx_open_interest']}: {_report_value(technical.open_interest, language)}\n"
+            f"- {h['okx_orderbook_imbalance']}: {_report_value(technical.orderbook_imbalance, language)}\n"
+            f"- {h['swap_context']}: {technical.swap_context_summary or _none_text(language)}\n"
+            f"- {h['support_zones']}: {', '.join(map(str, technical.support_zones)) or _none_text(language)}\n"
+            f"- {h['resistance_zones']}: {', '.join(map(str, technical.resistance_zones)) or _none_text(language)}\n"
             f"- {h['confidence']}: {technical.confidence}",
             f"## {h['bull_title']}\n"
             f"### {h['thesis']}\n{constructive.thesis}\n\n"
-            f"### {h['evidence']}\n{_md_list(constructive.evidence)}\n\n"
-            f"### {h['conditions']}\n{_md_list(constructive.conditions)}\n\n"
+            f"### {h['evidence']}\n{_md_list(constructive.evidence, language)}\n\n"
+            f"### {h['conditions']}\n{_md_list(constructive.conditions, language)}\n\n"
             f"- {h['confidence']}: {constructive.confidence}",
             f"## {h['bear_title']}\n"
             f"### {h['thesis']}\n{risk.thesis}\n\n"
-            f"### {h['evidence']}\n{_md_list(risk.evidence)}\n\n"
-            f"### {h['conditions']}\n{_md_list(risk.conditions)}\n\n"
+            f"### {h['evidence']}\n{_md_list(risk.evidence, language)}\n\n"
+            f"### {h['conditions']}\n{_md_list(risk.conditions, language)}\n\n"
             f"- {h['confidence']}: {risk.confidence}",
             f"## {h['debate']}\n"
-            f"- Rounds: {debate.get('round_count', 1)}\n"
-            f"- Points of agreement: {_inline_list(debate.get('points_of_agreement', []))}\n"
-            f"- Key tensions: {_inline_list(debate.get('key_tensions', []))}\n"
-            f"- Evidence quality notes: {_inline_list(debate.get('evidence_quality_notes', []))}\n\n"
-            f"### {h['debate_conclusion']}\n{debate.get('reporter_handoff', 'None')}\n\n"
-            f"### Round Log\n{_debate_round_log(debate.get('rounds', []))}",
+            f"- {h['rounds']}: {debate.get('round_count', 1)}\n"
+            f"- {h['points_agreement']}: {_inline_list(debate.get('points_of_agreement', []), language)}\n"
+            f"- {h['key_tensions']}: {_inline_list(debate.get('key_tensions', []), language)}\n"
+            f"- {h['evidence_quality']}: {_inline_list(debate.get('evidence_quality_notes', []), language)}\n\n"
+            f"### {h['debate_conclusion']}\n{debate.get('reporter_handoff', _none_text(language))}\n\n"
+            f"### {h['round_log']}\n{_debate_round_log(debate.get('rounds', []), language)}",
             f"## {h['final_reporter']}\n"
             f"### {h['fundamental_summary']}\n{final.fundamental_summary}\n\n"
             f"### {h['news_summary']}\n{final.news_impact_summary}\n\n"
             f"### {h['sentiment_summary']}\n{final.sentiment_summary}\n\n"
             f"### {h['technical_summary']}\n{final.technical_summary}\n\n"
-            f"### {h['key_drivers']}\n{_md_list(final.key_drivers)}\n\n"
-            f"### {h['key_risks']}\n{_md_list(final.key_risks)}\n\n"
-            f"### {h['uncertainty']}\n{_md_list(final.uncertainty_factors)}",
+            f"### {h['key_drivers']}\n{_md_list(final.key_drivers, language)}\n\n"
+            f"### {h['key_risks']}\n{_md_list(final.key_risks, language)}\n\n"
+            f"### {h['uncertainty']}\n{_md_list(final.uncertainty_factors, language)}",
             f"## {h['data_metadata']}\n"
             f"- {h['ohlcv_bars']}: {len(data.ohlcv)}\n"
-            f"- {h['market_context_sections']}: {', '.join(data.market_context.keys()) or 'None'}\n"
+            f"- {h['market_context_sections']}: {', '.join(data.market_context.keys()) or _none_text(language)}\n"
             f"- {h['news_events']}: {len(data.news_events)}\n"
             f"- {h['sentiment_inputs']}: {len(data.sentiment_inputs)}\n"
-            f"- {h['provider_mode']}: {data.source_metadata.get('provider_mode', 'unknown')}\n"
-            f"- {h['tool_policy']}: {data.source_metadata.get('tool_call_policy', 'unknown')}\n"
-            f"- {h['agent_execution_mode']}: {data.source_metadata.get('agent_execution_mode', 'unknown')}\n"
-            f"- {h['sentiment_runtime']}: {data.source_metadata.get('sentiment_runtime', 'main')}\n"
+            f"- {h['provider_mode']}: {_report_value(data.source_metadata.get('provider_mode', 'unknown'), language)}\n"
+            f"- {h['tool_policy']}: {_report_value(data.source_metadata.get('tool_call_policy', 'unknown'), language)}\n"
+            f"- {h['agent_execution_mode']}: {_report_value(data.source_metadata.get('agent_execution_mode', 'unknown'), language)}\n"
+            f"- {h['sentiment_runtime']}: {_report_value(data.source_metadata.get('sentiment_runtime', 'main'), language)}\n"
             f"- {h['provider_warnings']}: {_inline_list(_flatten_warnings(data.source_metadata.get('agent_tool_warnings')))}\n"
-            f"- {h['guardrail_violations']}: {_guardrail_summary(metrics)}",
+            f"- {h['guardrail_violations']}: {_report_value(_guardrail_summary(metrics), language)}",
             f"## {h['usage_constraints']}\n{_md_list(final.usage_constraints)}",
             f"## {h['downstream']}\n{final.downstream_agent_context}",
         ]
@@ -1368,9 +1378,25 @@ def _markdown_labels(language: str) -> dict[str, str]:
             "trend": "趋势",
             "momentum": "动量",
             "volatility_regime": "波动状态",
+            "macd_state": "MACD状态",
+            "realized_volatility": "实现波动率",
+            "max_drawdown": "最大回撤",
+            "okx_mark_price": "OKX标记价格",
+            "okx_index_price": "OKX指数价格",
+            "okx_funding_rate": "OKX资金费率",
+            "okx_open_interest": "OKX未平仓量",
+            "okx_orderbook_imbalance": "OKX订单簿不平衡",
+            "swap_context": "SWAP上下文",
+            "support_zones": "支撑区",
+            "resistance_zones": "阻力区",
             "thesis": "核心论点",
             "conditions": "成立条件",
             "debate": "多空辩论",
+            "rounds": "轮次",
+            "points_agreement": "共识",
+            "key_tensions": "主要分歧",
+            "evidence_quality": "证据质量说明",
+            "round_log": "辩论记录",
             "debate_conclusion": "辩论结论",
             "final_reporter": "最终研究报告",
             "fundamental_summary": "基本面/宏观摘要",
@@ -1431,10 +1457,26 @@ def _markdown_labels(language: str) -> dict[str, str]:
         "label": "Label",
         "score": "Score",
         "trend": "Trend",
-        "momentum": "Momentum",
-        "volatility_regime": "Volatility regime",
-        "thesis": "Thesis",
-        "conditions": "Conditions",
+            "momentum": "Momentum",
+            "volatility_regime": "Volatility regime",
+            "macd_state": "MACD state",
+            "realized_volatility": "Realized volatility",
+            "max_drawdown": "Max drawdown",
+            "okx_mark_price": "OKX mark price",
+            "okx_index_price": "OKX index price",
+            "okx_funding_rate": "OKX funding rate",
+            "okx_open_interest": "OKX open interest",
+            "okx_orderbook_imbalance": "OKX orderbook imbalance",
+            "swap_context": "SWAP context",
+            "support_zones": "Support zones",
+            "resistance_zones": "Resistance zones",
+            "thesis": "Thesis",
+            "conditions": "Conditions",
+            "rounds": "Rounds",
+            "points_agreement": "Points of agreement",
+            "key_tensions": "Key tensions",
+            "evidence_quality": "Evidence quality notes",
+            "round_log": "Round Log",
         "debate": "Bull / Bear Debate",
         "debate_conclusion": "Debate Conclusion",
         "fundamental_summary": "Fundamental Summary",
@@ -1459,8 +1501,12 @@ def _markdown_labels(language: str) -> dict[str, str]:
     }
 
 
-def _md_list(items: list[Any]) -> str:
-    return "\n".join(f"- {item}" for item in items) if items else "- None"
+def _md_list(items: list[Any], language: str = "en") -> str:
+    return "\n".join(f"- {item}" for item in items) if items else f"- {_none_text(language)}"
+
+
+def _none_text(language: str) -> str:
+    return "无" if language == "zh" else "None"
 
 
 def _report_value(value: Any, language: str) -> str:
@@ -1496,21 +1542,37 @@ def _report_value(value: Any, language: str) -> str:
         "sideways": "震荡",
         "positive": "正向",
         "negative": "负向",
+        "normal": "正常",
+        "None": "无",
+        "none": "无",
+        "fixture": "固定样例",
+        "live": "实时",
+        "parallel": "并行",
+        "sequential": "序列",
+        "main": "主模型",
+        "pending during report render": "报告渲染中待检查",
+        "fixture_data_scoped_to_agent_contract": "固定样例数据按Agent契约隔离",
+        "tradingagents_style_llm_tool_loop": "TradingAgents风格LLM工具循环",
+        "analyst_agents_call_allowed_tools": "分析师Agent调用授权工具",
     }
     return mapping.get(text, text)
 
 
-def _inline_list(items: list[Any]) -> str:
-    return "; ".join(str(item) for item in items) if items else "None"
+def _inline_list(items: list[Any], language: str = "en") -> str:
+    return "; ".join(str(item) for item in items) if items else _none_text(language)
 
 
-def _debate_round_log(rounds: list[dict[str, Any]]) -> str:
+def _debate_round_log(rounds: list[dict[str, Any]], language: str = "en") -> str:
     rows: list[str] = []
     for item in rounds:
         case = item.get("case") if isinstance(item, dict) else {}
         thesis = case.get("thesis") if isinstance(case, dict) else None
-        rows.append(f"- Round {item.get('round')}: {item.get('speaker')} - {thesis or 'No thesis recorded'}")
-    return "\n".join(rows) if rows else "- None"
+        if language == "zh":
+            speaker = {"bull_researcher": "建设性研究员", "bear_researcher": "风险研究员"}.get(str(item.get("speaker")), item.get("speaker"))
+            rows.append(f"- 第 {item.get('round')} 轮：{speaker} - {thesis or '未记录论点'}")
+        else:
+            rows.append(f"- Round {item.get('round')}: {item.get('speaker')} - {thesis or 'No thesis recorded'}")
+    return "\n".join(rows) if rows else f"- {_none_text(language)}"
 
 
 def _guardrail_summary(metrics: dict[str, Any]) -> str:

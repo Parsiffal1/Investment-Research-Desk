@@ -77,6 +77,7 @@ class FundamentalMacroAnalyst:
     name = "fundamental_macro"
 
     def run(self, data: NormalizedData, llm: LLMClient) -> FundamentalMacroResult:
+        language = _agent_language(data)
         request = RunRequest(symbol=data.symbol, asset_class=data.asset_class, horizon=data.horizon)
         relevant_events, ranked_events = _filter_relevant_news_events(data.news_events, request)
         evidence_events = relevant_events or data.news_events
@@ -126,22 +127,27 @@ class FundamentalMacroAnalyst:
                 "source_metadata": data.source_metadata,
                 "news_events": [event.model_dump(mode="json") for event in evidence_events[:8]],
                 "ranked_candidate_news_events": ranked_events[:16],
-                "instruction": (
-                    "For crypto and SWAP instruments, treat equity-style fundamentals as unavailable unless supplied. "
-                    "Do not use unrelated company headlines as direct evidence. Use ranked_candidate_news_events to "
-                    "separate direct, macro, indirect, and low-relevance evidence."
+                "language": language,
+                "instruction": _with_language_instruction(
+                    (
+                        "For crypto and SWAP instruments, treat equity-style fundamentals as unavailable unless supplied. "
+                        "Do not use unrelated company headlines as direct evidence. Use ranked_candidate_news_events to "
+                        "separate direct, macro, indirect, and low-relevance evidence."
+                    ),
+                    language,
                 ),
             },
             FundamentalMacroResult,
             fallback,
         )
-        return result
+        return _localize_structured_result(result, language)
 
 
 class NewsImpactAnalyst:
     name = "news_impact"
 
     def run(self, data: NormalizedData, llm: LLMClient) -> NewsImpactResult:
+        language = _agent_language(data)
         request = RunRequest(symbol=data.symbol, asset_class=data.asset_class, horizon=data.horizon)
         relevant_events, ranked_events = _filter_relevant_news_events(data.news_events, request)
         scoped_data = data.model_copy(update={"news_events": relevant_events or data.news_events})
@@ -154,11 +160,13 @@ class NewsImpactAnalyst:
                 "asset_class": data.asset_class,
                 "news_events": [event.model_dump(mode="json") for event in scoped_data.news_events[:12]],
                 "ranked_candidate_news_events": ranked_events[:16],
+                "language": language,
+                "instruction": _language_instruction(language),
             },
             NewsImpactResult,
             fallback,
         )
-        return result
+        return _localize_structured_result(result, language)
 
     def run_with_tools(
         self,
@@ -392,6 +400,7 @@ class SentimentAnalyst:
     name = "sentiment"
 
     def run(self, data: NormalizedData, llm: LLMClient, sentiment_classifier: SentimentClassifier | None = None) -> SentimentResult:
+        language = _agent_language(data)
         texts = [item.text for item in data.sentiment_inputs]
         joined = " ".join(texts).lower()
         bullish = sum(1 for term in BULLISH_TERMS if term in joined)
@@ -448,19 +457,23 @@ class SentimentAnalyst:
                 "sentiment_inputs": [item.model_dump(mode="json") for item in data.sentiment_inputs[:20]],
                 "sentiment_adapter": adapter_payload,
                 "structured_sentiment_blocks": _sentiment_source_blocks(data.sentiment_inputs),
-                "instruction": (
-                    "Read sentiment as pre-collected source blocks. Distinguish institutional/news framing, retail "
-                    "posts, community discussion, sponsored material, and generic market chatter. Weight sample size, "
-                    "source quality, and direct relevance to the instrument before selecting evidence. If "
-                    "sentiment_adapter is present, use its aggregate label and score as the classification authority "
-                    "and use the main LLM only to summarize evidence and caveats."
+                "language": language,
+                "instruction": _with_language_instruction(
+                    (
+                        "Read sentiment as pre-collected source blocks. Distinguish institutional/news framing, retail "
+                        "posts, community discussion, sponsored material, and generic market chatter. Weight sample size, "
+                        "source quality, and direct relevance to the instrument before selecting evidence. If "
+                        "sentiment_adapter is present, use its aggregate label and score as the classification authority "
+                        "and use the main LLM only to summarize evidence and caveats."
+                    ),
+                    language,
                 ),
             },
             SentimentResult,
             fallback,
         )
         if adapter_payload is not None:
-            return result.model_copy(
+            preserved = result.model_copy(
                 update={
                     "crowd_mood": fallback.crowd_mood,
                     "sentiment_label": fallback.sentiment_label,
@@ -468,13 +481,16 @@ class SentimentAnalyst:
                     "confidence": fallback.confidence,
                 }
             )
-        return result.model_copy(update={"evidence": [_shorten_evidence(item) for item in result.evidence[:8]]})
+            return _localize_structured_result(preserved, language)
+        shortened = result.model_copy(update={"evidence": [_shorten_evidence(item) for item in result.evidence[:8]]})
+        return _localize_structured_result(shortened, language)
 
 
 class TechnicalAnalyst:
     name = "technical"
 
     def run(self, data: NormalizedData, llm: LLMClient) -> TechnicalState:
+        language = _agent_language(data)
         bars = data.ohlcv
         trend = trend_label(bars)
         rsi_14 = rsi(bars)
@@ -516,7 +532,7 @@ class TechnicalAnalyst:
             resistance_zones=resistances,
             confidence=0.82 if len(bars) >= 26 and swap_context else 0.78 if len(bars) >= 26 else 0.45,
         )
-        return _llm_structured(
+        result = _llm_structured(
             self.name,
             llm,
             {
@@ -525,15 +541,20 @@ class TechnicalAnalyst:
                 "indicator_results": fallback.model_dump(mode="json"),
                 "recent_ohlcv": [bar.model_dump(mode="json") for bar in bars[-10:]],
                 "swap_market_context": swap_context,
-                "instruction": (
-                    "Read the deterministic indicator results and OKX public SWAP market context. "
-                    "Do not recalculate indicators. Interpret funding, open interest, mark/index spread, price limits, "
-                    "recent trades, and orderbook imbalance as derivative market context only."
+                "language": language,
+                "instruction": _with_language_instruction(
+                    (
+                        "Read the deterministic indicator results and OKX public SWAP market context. "
+                        "Do not recalculate indicators. Interpret funding, open interest, mark/index spread, price limits, "
+                        "recent trades, and orderbook imbalance as derivative market context only."
+                    ),
+                    language,
                 ),
             },
             TechnicalState,
             fallback,
         )
+        return _localize_structured_result(result, language)
 
 
 class ConstructiveCaseAnalyst:
@@ -548,6 +569,7 @@ class ConstructiveCaseAnalyst:
         llm: LLMClient,
         debate_history: list[dict[str, Any]] | None = None,
         opponent_case: ResearchCase | None = None,
+        language: str = "en",
     ) -> ResearchCase:
         evidence = []
         evidence.extend(fundamental.key_drivers[:2])
@@ -567,7 +589,7 @@ class ConstructiveCaseAnalyst:
             ],
             confidence=min(0.82, max(0.45, (fundamental.confidence + news.confidence + technical.confidence) / 3)),
         )
-        return _llm_structured(
+        result = _llm_structured(
             self.name,
             llm,
             {
@@ -577,14 +599,19 @@ class ConstructiveCaseAnalyst:
                 "technical": technical.model_dump(mode="json"),
                 "debate_history": debate_history or [],
                 "bear_researcher": opponent_case.model_dump(mode="json") if opponent_case else None,
-                "instruction": (
-                    "Build the strongest constructive research case, but do not cite weak or unrelated evidence. "
-                    "Address risk evidence directly and state conditions that would keep the constructive case valid."
+                "language": language,
+                "instruction": _with_language_instruction(
+                    (
+                        "Build the strongest constructive research case, but do not cite weak or unrelated evidence. "
+                        "Address risk evidence directly and state conditions that would keep the constructive case valid."
+                    ),
+                    language,
                 ),
             },
             ResearchCase,
             fallback,
         )
+        return _localize_structured_result(result, language)
 
 
 class RiskCaseAnalyst:
@@ -599,6 +626,7 @@ class RiskCaseAnalyst:
         constructive: ResearchCase,
         llm: LLMClient,
         debate_history: list[dict[str, Any]] | None = None,
+        language: str = "en",
     ) -> ResearchCase:
         evidence = []
         evidence.extend(fundamental.concerns[:3])
@@ -620,7 +648,7 @@ class RiskCaseAnalyst:
             ],
             confidence=min(0.85, max(0.45, (fundamental.confidence + news.confidence + technical.confidence) / 3)),
         )
-        return _llm_structured(
+        result = _llm_structured(
             self.name,
             llm,
             {
@@ -630,20 +658,25 @@ class RiskCaseAnalyst:
                 "technical": technical.model_dump(mode="json"),
                 "bull_researcher": constructive.model_dump(mode="json"),
                 "debate_history": debate_history or [],
-                "instruction": (
-                    "Challenge the constructive case using direct risks, evidence quality issues, data gaps, and "
-                    "technical invalidation conditions. Do not overstate unsupported downside claims."
+                "language": language,
+                "instruction": _with_language_instruction(
+                    (
+                        "Challenge the constructive case using direct risks, evidence quality issues, data gaps, and "
+                        "technical invalidation conditions. Do not overstate unsupported downside claims."
+                    ),
+                    language,
                 ),
             },
             ResearchCase,
             fallback,
         )
+        return _localize_structured_result(result, language)
 
 
 class DebateModerator:
     name = "bull_bear_research_debate"
 
-    def run(self, constructive: ResearchCase, risk: ResearchCase, llm: LLMClient) -> ResearchDebateResult:
+    def run(self, constructive: ResearchCase, risk: ResearchCase, llm: LLMClient, language: str = "en") -> ResearchDebateResult:
         shared_evidence = sorted(set(constructive.evidence).intersection(risk.evidence))
         fallback = ResearchDebateResult(
             points_of_agreement=shared_evidence,
@@ -661,20 +694,25 @@ class DebateModerator:
             ),
             confidence=round((constructive.confidence + risk.confidence) / 2, 2),
         )
-        return _llm_structured(
+        result = _llm_structured(
             self.name,
             llm,
             {
                 "bull_researcher": constructive.model_dump(mode="json"),
                 "bear_researcher": risk.model_dump(mode="json"),
-                "instruction": (
-                    "Moderate the debate. Identify agreements, tensions, evidence-quality concerns, and reporter "
-                    "handoff. Do not make a trade recommendation or mention order execution."
+                "language": language,
+                "instruction": _with_language_instruction(
+                    (
+                        "Moderate the debate. Identify agreements, tensions, evidence-quality concerns, and reporter "
+                        "handoff. Do not make a trade recommendation or mention order execution."
+                    ),
+                    language,
                 ),
             },
             ResearchDebateResult,
             fallback,
         )
+        return _localize_structured_result(result, language)
 
 
 class ResearchReporter:
@@ -742,7 +780,7 @@ class ResearchReporter:
             source_metadata=_report_source_metadata(data.source_metadata),
             warnings=warnings,
         )
-        return _llm_structured(
+        result = _llm_structured(
             self.name,
             llm,
             {
@@ -766,6 +804,7 @@ class ResearchReporter:
             FinalResearchContext,
             fallback,
         )
+        return _localize_structured_result(result, language)
 
 
 def _reporter_instruction(language: str) -> str:
@@ -781,6 +820,174 @@ def _reporter_instruction(language: str) -> str:
             "enum values such as directional_view, balanced_view, and risk_level unchanged."
         )
     return base
+
+
+def _agent_language(data: NormalizedData) -> str:
+    return str(data.source_metadata.get("language", "en")).strip().lower()
+
+
+def _language_instruction(language: str) -> str:
+    if language != "zh":
+        return ""
+    return (
+        "Write every human-readable output field in concise professional Chinese. Keep JSON schema keys and controlled "
+        "enum values unchanged."
+    )
+
+
+def _with_language_instruction(instruction: str, language: str) -> str:
+    extra = _language_instruction(language)
+    return f"{instruction} {extra}".strip() if extra else instruction
+
+
+def _localize_structured_result(result: TModel, language: str) -> TModel:
+    if language != "zh":
+        return result
+    if isinstance(result, FundamentalMacroResult):
+        return result.model_copy(
+            update={
+                "key_drivers": [_zh_text(item) for item in result.key_drivers],
+                "concerns": [_zh_text(item) for item in result.concerns],
+                "evidence": [_zh_text(item) for item in result.evidence],
+            }
+        )
+    if isinstance(result, NewsImpactResult):
+        return result.model_copy(
+            update={
+                "dominant_events": [_zh_text(item) for item in result.dominant_events],
+                "event_type_summary": {key: _zh_text(value) for key, value in result.event_type_summary.items()},
+                "impact_logic": _zh_text(result.impact_logic),
+                "evidence": [_zh_text(item) for item in result.evidence],
+            }
+        )
+    if isinstance(result, SentimentResult):
+        return result.model_copy(update={"crowd_mood": _zh_text(result.crowd_mood), "evidence": [_zh_text(item) for item in result.evidence]})
+    if isinstance(result, TechnicalState):
+        return result.model_copy(update={"swap_context_summary": _zh_text(result.swap_context_summary) if result.swap_context_summary else None})
+    if isinstance(result, ResearchCase):
+        return _localize_research_case(result)
+    if isinstance(result, ResearchDebateResult):
+        return result.model_copy(
+            update={
+                "points_of_agreement": [_zh_text(item) for item in result.points_of_agreement],
+                "key_tensions": [_zh_text(item) for item in result.key_tensions],
+                "evidence_quality_notes": [_zh_text(item) for item in result.evidence_quality_notes],
+                "reporter_handoff": _zh_text(result.reporter_handoff),
+            }
+        )
+    if isinstance(result, FinalResearchContext):
+        return result.model_copy(
+            update={
+                "directional_rationale": _zh_text(result.directional_rationale),
+                "fundamental_summary": _zh_text(result.fundamental_summary) if result.fundamental_summary else None,
+                "news_impact_summary": _zh_text(result.news_impact_summary),
+                "sentiment_summary": _zh_text(result.sentiment_summary),
+                "technical_summary": _zh_text(result.technical_summary),
+                "constructive_case": _localize_research_case(result.constructive_case),
+                "risk_case": _localize_research_case(result.risk_case),
+                "key_drivers": [_zh_text(item) for item in result.key_drivers],
+                "key_risks": [_zh_text(item) for item in result.key_risks],
+                "uncertainty_factors": [_zh_text(item) for item in result.uncertainty_factors],
+                "downstream_agent_context": _zh_text(result.downstream_agent_context),
+                "usage_constraints": [_zh_text(item) for item in result.usage_constraints],
+            }
+        )
+    return result
+
+
+def _localize_research_case(case: ResearchCase) -> ResearchCase:
+    return case.model_copy(
+        update={
+            "thesis": _zh_text(case.thesis),
+            "evidence": [_zh_text(item) for item in case.evidence],
+            "conditions": [_zh_text(item) for item in case.conditions],
+        }
+    )
+
+
+def _zh_text(value: Any) -> str:
+    text = str(value)
+    exact = {
+        "safe-haven demand remains a relevant macro driver": "避险需求仍是相关的宏观驱动。",
+        "inflation data can reprice rate expectations": "通胀数据可能重新定价利率预期。",
+        "dollar strength can pressure risk-sensitive or dollar-priced assets": "美元走强可能压制风险资产或美元计价资产。",
+        "macro context is present but not strongly one-sided": "宏观背景存在，但方向并不明显单边。",
+        "limited macro evidence increases uncertainty": "宏观证据有限，增加判断不确定性。",
+        "U.S. CPI uncertainty keeps gold traders focused on real yields": "美国CPI不确定性使黄金交易者继续关注实际收益率。",
+        "Dollar strength caps upside but geopolitical risk supports safe-haven demand": "美元走强限制上行空间，但地缘风险支撑避险需求。",
+        "Current events lean supportive, but the output remains research context rather than a trading signal.": "当前事件整体偏支撑，但该输出仍是投研上下文，不是交易信号。",
+        "Gold bulls point to safe-haven demand and an uptrend, but traders remain cautious before CPI.": "黄金看多者关注避险需求和上行趋势，但交易者在CPI公布前保持谨慎。",
+        "Discussion tone is divided: delayed rate cuts and real yields are bearish risks, while geopolitical hedging is supportive.": "讨论情绪存在分歧：降息推迟和实际收益率是偏空风险，地缘对冲需求则提供支撑。",
+        "Constructive case depends on supportive macro drivers and technical confirmation.": "建设性情景取决于宏观驱动的支撑和技术面的确认。",
+        "Risk case centers on macro repricing, volatility, and possible technical failure.": "风险情景集中在宏观重新定价、波动上升和潜在技术失效。",
+        "price remains above identified support zones": "价格维持在已识别支撑区上方。",
+        "macro news does not reprice risk sharply against the asset": "宏观新闻没有显著向不利方向重新定价该资产风险。",
+        "break below support zones": "跌破支撑区。",
+        "hawkish macro surprise or stronger dollar impulse": "鹰派宏观意外或美元进一步走强。",
+        "news flow contradicts the constructive case": "新闻流与建设性情景相矛盾。",
+        "constructive case requires confirmation from support, catalyst quality, and macro conditions": "建设性情景需要支撑位、催化剂质量和宏观条件的确认。",
+        "risk case emphasizes repricing, volatility, evidence gaps, and data coverage uncertainty": "风险情景强调重新定价、波动、证据缺口和数据覆盖不确定性。",
+        "direct instrument evidence should be weighted above broad market or sector proxies": "直接标的证据应高于宽泛市场或行业代理证据的权重。",
+        "low-relevance news should not be promoted into final key drivers or key risks": "低相关性新闻不应进入最终关键驱动或关键风险。",
+        "Produce balanced research context only. Weigh direct evidence, technical confirmation, data gaps, and news/sentiment noise before assigning directional_view.": "仅生成平衡的投研上下文。在给出方向判断前，应权衡直接证据、技术确认、数据缺口以及新闻/情绪噪声。",
+        "live data coverage may vary by provider": "实时数据覆盖范围可能因数据源而异。",
+        "LLM summaries require evidence review before downstream strategy use": "LLM摘要在用于下游策略前需要进行证据复核。",
+        "Use as research context only. A separate decision, risk, and execution system is required before any trading action.": "仅作为投研上下文使用。任何交易行为前都需要独立的决策、风险和执行系统。",
+        "not financial advice": "不是投资建议。",
+        "not an order instruction": "不是下单指令。",
+        "does not include position sizing": "不包含仓位建议。",
+        "does not claim profitability": "不承诺收益。",
+        "no material news events found": "未发现重要新闻事件。",
+        "no sentiment inputs available": "没有可用情绪输入。",
+        "divided": "分歧",
+        "quiet": "平静",
+        "constructive": "建设性",
+        "risk_off": "避险",
+    }
+    if text in exact:
+        return exact[text]
+    if text.startswith("Directional research judgment is bullish because"):
+        return "方向性研究判断为看多，依据包括综合观点、新闻影响、情绪分数、技术状态以及多空情景置信度。"
+    if text.startswith("Directional research judgment is bearish because"):
+        return "方向性研究判断为看空，依据包括综合观点、新闻影响、情绪分数、技术状态以及多空情景置信度。"
+    if text.startswith("Market mood is "):
+        if "分歧" in text:
+            return text.replace("Market mood is 分歧", "市场情绪存在分歧").replace("score=", "分数=")
+        return (
+            text.replace("Market mood is divided", "市场情绪存在分歧")
+            .replace("Market mood is quiet", "市场情绪较平静")
+            .replace("label=mixed", "标签=分歧")
+            .replace("label=bullish", "标签=看多")
+            .replace("label=bearish", "标签=看空")
+            .replace("score=", "分数=")
+        )
+    if text.startswith("Trend="):
+        return (
+            text.replace("Trend=uptrend", "趋势=上行趋势")
+            .replace("Trend=downtrend", "趋势=下行趋势")
+            .replace("Trend=sideways", "趋势=震荡")
+            .replace("momentum=positive", "动量=正向")
+            .replace("momentum=negative", "动量=负向")
+            .replace("MACD=positive", "MACD=正向")
+            .replace("OKX_SWAP funding=", "OKX SWAP资金费率=")
+            .replace("open_interest=", "未平仓量=")
+            .replace("orderbook_imbalance=", "订单簿不平衡=")
+        )
+    if text.startswith("sentiment is "):
+        return (
+            text.replace("sentiment is mixed", "情绪存在分歧")
+            .replace("sentiment is bullish", "情绪偏多")
+            .replace("sentiment is bearish", "情绪偏空")
+            .replace("with score", "分数")
+            .replace("indicating disagreement or caution", "显示分歧或谨慎")
+        )
+    if text.startswith("technical state is "):
+        return (
+            text.replace("technical state is mixed_to_bullish", "技术状态分歧偏多")
+            .replace("technical state is bullish", "技术状态偏多")
+            .replace("with trend uptrend", "趋势为上行")
+        )
+    return text
 
 
 def _llm_structured(
