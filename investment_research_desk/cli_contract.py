@@ -46,11 +46,17 @@ class SentimentProviderOption(str, Enum):
     fake = "fake"
 
 
+class ReportLanguageOption(str, Enum):
+    en = "en"
+    zh = "zh"
+
+
 ALLOWED_ASSET_CLASSES = tuple(item.value for item in AssetClassOption)
 ALLOWED_HORIZONS = tuple(item.value for item in HorizonOption)
 ALLOWED_RESEARCH_DEPTHS = tuple(item.value for item in ResearchDepthOption)
 ALLOWED_LLM_PROVIDERS = tuple(item.value for item in LLMProviderOption)
 ALLOWED_SENTIMENT_PROVIDERS = tuple(item.value for item in SentimentProviderOption)
+ALLOWED_REPORT_LANGUAGES = tuple(item.value for item in ReportLanguageOption)
 
 REQUIRED_ARTIFACTS = (
     "input.json",
@@ -175,8 +181,8 @@ def infer_asset_class(symbol: str) -> str:
 
 def _normalize_language(language: str | None) -> str:
     normalized = (language or "en").strip().lower()
-    if normalized not in {"en", "zh"}:
-        raise ValueError("language must be one of: en, zh")
+    if normalized not in ALLOWED_REPORT_LANGUAGES:
+        raise ValueError(f"language must be one of: {allowed_text(ALLOWED_REPORT_LANGUAGES)}")
     return normalized
 
 

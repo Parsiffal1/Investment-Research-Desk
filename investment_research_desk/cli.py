@@ -28,6 +28,7 @@ from investment_research_desk.cli_contract import (
     HorizonOption,
     LLMProviderOption,
     REQUIRED_ARTIFACTS,
+    ReportLanguageOption,
     ResearchDepthOption,
     SentimentProviderOption,
     TEAM_FLOW,
@@ -168,6 +169,7 @@ def root(
 
 
 def interactive() -> None:
+    settings = load_settings()
     contract = _collect_interactive_contract()
     if contract.mode == "config_check":
         config_check()
@@ -243,6 +245,9 @@ def _collect_interactive_contract() -> CLIInteractionContract:
     horizon = _enum_select("Horizon", HorizonOption, HorizonOption.short_term)
     console.print(_step_panel(4, "Research Depth", "Select how much reasoning/debate depth to request from the workflow.", ResearchDepthOption.standard.value))
     research_depth = _enum_select("Research depth", ResearchDepthOption, ResearchDepthOption.standard)
+    default_language = _default_report_language_option(settings.report_language)
+    console.print(_step_panel(5, "Report Language", "Select the language used in the console report and Markdown brief.", default_language.value))
+    language = _enum_select("Report language", ReportLanguageOption, default_language)
 
     try:
         request = build_run_request(
@@ -257,6 +262,7 @@ def _collect_interactive_contract() -> CLIInteractionContract:
             sentiment_base_model=None,
             sentiment_adapter_path=None,
             sentiment_score_batch_size=None,
+            language=language,
         )
     except ValueError as exc:
         _exit_with_error(str(exc))
@@ -1206,6 +1212,13 @@ def _enum_select(message: str, enum_type, default):
         for item in enum_type
     ]
     return _select(message, choices)
+
+
+def _default_report_language_option(raw: str | None) -> ReportLanguageOption:
+    try:
+        return ReportLanguageOption((raw or "en").strip().lower())
+    except ValueError:
+        return ReportLanguageOption.en
 
 
 def _confirm(message: str, default: bool) -> bool:

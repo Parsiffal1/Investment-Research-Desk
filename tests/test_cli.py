@@ -1,3 +1,5 @@
+import json
+
 from typer.testing import CliRunner
 
 from investment_research_desk.cli import app
@@ -33,6 +35,28 @@ def test_cli_report_fixture(tmp_path):
     assert "Research Context" in result.output
     assert list(tmp_path.glob("*/final_research_context.json"))
     assert list(tmp_path.glob("*/final_market_context_cache.json"))
+
+
+def test_cli_report_fixture_accepts_chinese_language(tmp_path):
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            "--fixture",
+            "gold_cpi",
+            "--llm-provider",
+            "fake",
+            "--language",
+            "zh",
+            "--runs-dir",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    final_context = next(tmp_path.glob("*/final_research_context.json"))
+    payload = json.loads(final_context.read_text(encoding="utf-8"))
+    assert payload["source_metadata"]["language"] == "zh"
 
 
 def test_cli_demo_uses_fixture_fake_path(tmp_path):
@@ -104,6 +128,24 @@ def test_build_run_request_accepts_sentiment_adapter_contract(tmp_path):
     assert request.sentiment_base_model == "Qwen/Qwen3-8B"
     assert request.sentiment_adapter_path == str(tmp_path / "adapter")
     assert request.sentiment_score_batch_size == 2
+
+
+def test_build_run_request_rejects_invalid_report_language():
+    try:
+        build_run_request(
+            symbol="ETH-USDT-SWAP",
+            asset_class="auto",
+            horizon="short_term",
+            research_depth="standard",
+            fixture=None,
+            llm_provider="ollama",
+            model="qwen3:8b",
+            language="fr",
+        )
+    except ValueError as exc:
+        assert "language must be one of: en, zh" in str(exc)
+    else:
+        raise AssertionError("invalid report language should be rejected")
 
 
 def test_cli_runs_lists_checkpoint(tmp_path):
