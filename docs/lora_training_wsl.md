@@ -1,42 +1,39 @@
 # Sentiment LoRA Training on WSL2 CUDA
 
-This project trains the first adapter only for sentiment classification. The Windows CLI remains usable without these training dependencies; this workflow is for WSL2 + CUDA only.
+This project trains the first adapter only for financial sentiment classification. The Windows CLI remains usable without training dependencies; this workflow is for WSL2 + CUDA.
 
-## Current Windows Gate
+## Environment
 
-The current machine has an NVIDIA RTX 5070 Ti Laptop GPU visible from Windows, but WSL is not installed/enabled in the current non-admin Codex session. Install WSL from an elevated PowerShell:
-
-```powershell
-Set-Location C:\Users\saton\Documents\Codex\2026-05-14\files-mentioned-by-the-user-finsight
-.\scripts\wsl\install_wsl_ubuntu_admin.ps1
-```
-
-Restart Windows if prompted, then launch Ubuntu once and create the Linux user.
-
-## WSL Setup
-
-Copy or clone the project into WSL ext4 storage, for example:
+Use a dedicated WSL virtual environment. Do not share the Windows `.venv`.
 
 ```bash
-mkdir -p ~/projects
-cp -a /mnt/c/Users/saton/Documents/Codex/2026-05-14/files-mentioned-by-the-user-finsight ~/projects/investment-research-desk
-cd ~/projects/investment-research-desk
-```
-
-Create the training environment:
-
-```bash
+cd <PROJECT_DIR>
 bash scripts/wsl/setup_lora_env.sh
 ```
 
-Run the heavier optional model-load check before training:
+Optional model-load verification:
 
 ```bash
-source .venv-lora/bin/activate
+source <WSL_VENV>/bin/activate
 python scripts/wsl/verify_lora_env.py --load-model
 ```
 
-## Training and Evaluation
+## Data
+
+The training pipeline uses:
+
+- Financial PhraseBank
+- Twitter Financial News Sentiment
+
+Held-out splits are kept separate from training. Manifests include dataset name, split, row index, label, text hash, and normalized text hash to detect overlap.
+
+Prepare data:
+
+```bash
+ird lora prepare-data --output-dir lora_data/sentiment
+```
+
+## Training
 
 Smoke run:
 
@@ -56,7 +53,7 @@ Full run:
 bash scripts/wsl/run_lora_pipeline.sh full
 ```
 
-The full run writes:
+The full run writes local artifacts such as:
 
 - `lora_data/sentiment/train.jsonl`
 - `lora_data/sentiment/dev.jsonl`
@@ -67,14 +64,8 @@ The full run writes:
 - `eval/results/lora_full/heldout_eval_results.json`
 - `eval/results/lora_full/heldout_eval_results.md`
 
-Do not commit `models/` or `lora_data/`.
+## Publishing
 
-## Acceptance Gate
+Do not commit raw training data, intermediate trainer checkpoints, optimizer states, or local cache directories.
 
-- `python scripts/wsl/verify_lora_env.py --load-model` succeeds.
-- `ird lora prepare-data` reports `leakage_check=pass`.
-- `train_eval_overlap`, `dev_eval_overlap`, and `train_dev_overlap` are all zero.
-- `heldout_eval_results.json` includes accuracy, Macro-F1, per-class metrics, output contract status, and baseline deltas.
-- README or resume metrics are updated only if measured LoRA held-out metrics beat the stored baseline.
-
-The default evaluation path uses forced-choice label scoring for classification metrics. Generative JSON evaluation is limited to a small contract-check sample so full held-out evaluation does not spend hours generating short labels.
+If publishing the final adapter in this repository, track `adapter_model.safetensors` with Git LFS and include only the final adapter directory plus metrics/config files.

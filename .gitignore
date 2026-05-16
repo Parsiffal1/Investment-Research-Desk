@@ -18,5 +18,17 @@ runs*/
 eval/results/
 eval/data/
 eval/tmp_*/
-models/
 lora_data/
+
+# Keep model training outputs ignored by default. The public release includes
+# only the final sentiment adapter directory below, with safetensors tracked by
+# Git LFS.
+models/*
+!models/investment-research-desk-lora-sentiment/
+models/investment-research-desk-lora-sentiment/*
+!models/investment-research-desk-lora-sentiment/20260515T123418Z/
+models/investment-research-desk-lora-sentiment/20260515T123418Z/*
+!models/investment-research-desk-lora-sentiment/20260515T123418Z/adapter/
+!models/investment-research-desk-lora-sentiment/20260515T123418Z/adapter/**
+models/**/trainer/
+models/**/checkpoint-*/

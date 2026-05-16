@@ -1,68 +1,133 @@
 # Investment Research Desk / 投研策略台
 
-Investment Research Desk 是一个本地 CLI-first 多 Agent 投研上下文生成系统。它把市场数据、新闻/宏观事件、情绪输入、技术指标和 Bull/Bear debate 整理成结构化投研材料，供人工复核和下游策略研究使用。
+Investment Research Desk is a local CLI-first multi-agent research system that turns market data, news, macro context, sentiment inputs, technical indicators, and bull/bear debate into structured investment research context. It is designed for research assistance and human review, not trade execution.
 
-本项目不是交易执行系统：不下单、不管理账户或持仓、不给仓位比例、不承诺收益。
+投研策略台是一个本地 CLI-first 多 Agent 投研上下文生成系统，用于把市场数据、新闻与宏观事件、情绪输入、技术指标和 Bull/Bear debate 整理成结构化投研材料，供人工复核和后续策略研究使用。它不是交易执行系统。
+
+## What It Is Not
+
+This project does not place orders, manage accounts, read balances, manage positions, provide position sizing, promise returns, or provide financial advice. The output is research context only.
+
+本项目不下单、不管理账户或持仓、不读取账户余额、不输出仓位 sizing、不承诺收益，也不构成投资建议。所有输出仅作为投研上下文。
+
+## Features
+
+- Menu-style and scriptable CLI through `ird`.
+- LangGraph-based multi-agent workflow.
+- Analyst team for fundamental/macro, news impact, sentiment, and technical analysis.
+- Bull/Bear research debate and final research reporter.
+- ReAct-style agent tool loops with tool budgets and relevance filtering.
+- OKX public SWAP market context, Yahoo Finance, FMP, Finnhub, Tavily, StockTwits, Reddit, Jin10, and fixture fallback.
+- Structured Pydantic outputs, run artifacts, traces, metrics, and guardrails.
+- Optional Qwen3 sentiment LoRA adapter through Hugging Face PEFT.
+- English and Chinese report modes.
 
 ## Quick Start
 
-Windows 普通运行：
-
 ```powershell
 uv sync
-uv run ird --help
+Copy-Item .env.example .env
+notepad .env
 uv run ird config check
-uv run ird report --symbol NVDA --horizon short_term --llm-provider ollama
+uv run pytest
 ```
 
-交互式入口：
+Interactive CLI:
 
 ```powershell
 uv run ird
 ```
 
-fixture demo：
+Run a report:
+
+```powershell
+uv run ird report --symbol ETH-USDT-SWAP --asset-class crypto --horizon short_term --llm-provider ollama --language zh
+```
+
+Run an offline fixture demo:
 
 ```powershell
 uv run ird demo
 ```
 
-API key 放在项目根目录 `.env`，可从 `.env.example` 复制：
+## Configuration
 
-```powershell
-Copy-Item .env.example .env
-notepad .env
-```
-
-核心配置：
+Common `.env` settings:
 
 ```text
 IRD_OLLAMA_BASE_URL=http://localhost:11434/v1
 IRD_OLLAMA_MODEL=qwen3:8b
+IRD_DEFAULT_LLM_PROVIDER=auto
+
 OKX_BASE_URL=https://www.okx.com
 TAVILY_API_KEY=
 FMP_API_KEY=
 FINNHUB_API_KEY=
+JIN10_API_URL=
+JIN10_API_KEY=
+
+IRD_AGENT_EXECUTION_MODE=sequential
+IRD_LLM_TIMEOUT_SEC=180
+IRD_AGENT_TOOL_LOOP_TIMEOUT_SEC=240
+IRD_AGENT_MAX_TOOL_CALLS=8
+IRD_REPORT_LANGUAGE=en
 ```
+
+Do not commit `.env`. Use `.env.example` for shareable configuration.
 
 ## CLI
 
-- `ird`：菜单式交互研究流程。
-- `ird report`：非交互式单标的报告。
-- `ird batch`：批量报告。
-- `ird runs`：查看 run 目录和 checkpoint。
-- `ird config check`：检查 Ollama、provider、adapter runtime。
-- `ird okx check`：检查 OKX public SWAP market data。
-- `ird lora ...`：情绪分类 LoRA 数据准备、训练、评估。
-
-例子：
-
-```powershell
-uv run ird report --symbol ETH-USDT-SWAP --asset-class crypto --horizon short_term --llm-provider ollama
-uv run ird report --symbol SPY --horizon short_term --llm-provider ollama --language zh
+```text
+ird                         Interactive menu
+ird report                  Single research report
+ird batch                   Batch reports
+ird runs                    List run artifacts and checkpoints
+ird config check            Environment and provider preflight
+ird okx check               OKX public SWAP market data check
+ird eval                    Lightweight regression/evaluation suites
+ird lora prepare-data       Prepare sentiment LoRA data
+ird lora train              Train sentiment LoRA adapter
+ird lora eval               Evaluate sentiment LoRA adapter
 ```
 
-每次运行写入：
+## Workflow
+
+```text
+Run Controller
+  -> Analyst Team
+     -> Fundamental / Macro Analyst
+     -> News / Macro Impact Analyst
+     -> Sentiment Analyst
+     -> Technical Analyst
+  -> Bull/Bear Research Debate
+     -> Bull Researcher
+     -> Bear Researcher
+     -> Debate Moderator
+  -> Research Reporter
+  -> final_market_context_cache
+  -> persist artifacts
+```
+
+Live Ollama runs default to `IRD_AGENT_EXECUTION_MODE=sequential` to keep local Qwen3-8B execution stable. Fixture and fake-LLM test paths can still run in parallel.
+
+Each agent owns its tool boundary. The LLM decides whether to call tools, which query to use, how many times to call, and when to stop. The system enforces budgets, financial-scope query constraints, relevance filtering, required tool floors, and partial-evidence fallback.
+
+## Data Sources
+
+- OKX: public SWAP OHLCV, mark/index price, funding, open interest, recent trades, and order book context. Account, balance, position, and order endpoints are intentionally out of scope.
+- Yahoo Finance: equity OHLCV and ticker news fallback.
+- FMP: quote/profile/news and free-tier compatible fallback.
+- Finnhub: quote and company/general news.
+- Tavily: search enrichment.
+- StockTwits and Reddit: sentiment inputs.
+- Jin10: macro/news adapter when configured.
+- Fixtures: stable offline tests and demos.
+
+Provider errors such as free-tier `402/403` responses are recorded in provider status and traces, but they are not promoted into final business warnings.
+
+## Run Artifacts
+
+Each run writes:
 
 ```text
 runs/{run_id}/
@@ -80,75 +145,34 @@ runs/{run_id}/
   metrics.json
 ```
 
-## Workflow
+Run artifacts are ignored by git because they may contain provider outputs, local paths, and research history.
 
-当前工作流：
+## Sentiment LoRA Adapter
 
-```text
-Run Controller
-  -> Analyst Team
-     -> Fundamental/Macro Analyst
-     -> News/Macro Impact Analyst
-     -> Sentiment Analyst
-     -> Technical Analyst
-  -> Bull/Bear Research Debate
-     -> Bull Researcher
-     -> Bear Researcher
-  -> Research Reporter
-  -> final_market_context_cache
-```
+The first adapter is limited to Sentiment Analyst classification. It does not replace the main report LLM, the analyst team, or the Bull/Bear debate.
 
-live + Ollama 默认使用 `IRD_AGENT_EXECUTION_MODE=sequential`，优先保证本地 Qwen3-8B 稳定运行。fixture/fake 测试仍可并行。
-
-每个 analyst 都通过自己的工具边界获取数据。LLM 决定是否调用工具、如何优化 query、调用几次；系统负责预算、金融范围约束、relevance filtering 和必要的 contract floor。
-
-## Data Sources
-
-已接入的数据源：
-
-- OKX：public SWAP K 线、mark/index、funding、open interest、order book 等。只使用 public market endpoint，不接 account/balance/position/order。
-- FMP：quote/profile、免费版可用范围内的新闻和 OHLCV fallback。
-- Finnhub：quote、company/general news。
-- Yahoo Finance：equity OHLCV 和 ticker news。
-- Tavily：搜索增强，作为补充来源。
-- StockTwits / Reddit：情绪输入。
-- Jin10：宏观新闻接口配置入口。
-- Fixtures：稳定测试和 demo。
-
-Provider 402/403 会记录在 provider status 中，但不会作为业务 warning 污染最终报告。
-
-## Sentiment LoRA
-
-第一阶段 LoRA 只用于 Sentiment Analyst 的金融情绪分类。主报告、其他 analyst、Bull/Bear debate 仍由 `--llm-provider` 指定的主模型执行。
-
-训练和 adapter 运行建议放在 WSL2 CUDA 环境：
+Training and adapter runtime are intended for a WSL2 + CUDA environment:
 
 ```bash
 bash scripts/wsl/setup_lora_env.sh
 bash scripts/wsl/run_lora_pipeline.sh smoke
 ```
 
-带 adapter 运行：
-
-```powershell
-.\scripts\wsl\start_ollama_bridge.ps1
-wsl -d Ubuntu -- bash scripts/wsl/run_adapter_report.sh ETH-USDT-SWAP
-```
-
-也可以显式指定：
+Run with adapter:
 
 ```bash
-ird report \
-  --symbol ETH-USDT-SWAP \
-  --asset-class crypto \
-  --horizon short_term \
-  --llm-provider ollama \
-  --model qwen3:8b \
-  --sentiment-provider hf-peft \
-  --sentiment-adapter-path models/investment-research-desk-lora-sentiment/<run>/adapter
+export IRD_SENTIMENT_ADAPTER_PATH=models/investment-research-desk-lora-sentiment/<timestamp>/adapter
+bash scripts/wsl/run_adapter_report.sh ETH-USDT-SWAP
 ```
 
-如果 `.env` 设置 `IRD_SENTIMENT_PROVIDER=hf-peft` 但没有提供 adapter path，系统会尝试自动发现 `models/investment-research-desk-lora-sentiment/<timestamp>/adapter` 下最新 adapter。Windows 环境缺少 `torch/transformers/peft/bitsandbytes/accelerate` 时会 preflight fail，不会静默降级。
+If the adapter is published with the repository, `adapter_model.safetensors` is tracked through Git LFS.
+
+## Documentation
+
+- `docs/current_implementation.md`: current implemented behavior.
+- `docs/windows_cli_guide.md`: Windows CLI usage.
+- `docs/wsl_lora_adapter_guide.md`: WSL + LoRA adapter usage.
+- `docs/lora_training_wsl.md`: LoRA training workflow.
 
 ## Tests
 
@@ -156,17 +180,18 @@ ird report \
 uv run pytest
 ```
 
-WSL training/runtime 环境：
+WSL runtime:
 
 ```bash
-cd /mnt/c/Users/saton/Documents/Codex/2026-05-14/files-mentioned-by-the-user-finsight
-source /home/parsiffal/.venvs/ird-lora/bin/activate
+cd <PROJECT_DIR>
+source <WSL_VENV>/bin/activate
 python -m pytest
 ```
 
-## Documentation
+## License
 
-- `docs/current_implementation.md`：当前真实实现说明。
-- `docs/windows_cli_guide.md`：Windows 普通 CLI 使用指南。
-- `docs/wsl_lora_adapter_guide.md`：WSL + LoRA adapter 使用指南。
-- `docs/lora_training_wsl.md`：LoRA 训练环境和流程。
+MIT License. See `LICENSE`.
+
+## Disclaimer
+
+Investment Research Desk is research software. It generates structured context for human review. It is not a broker, exchange, financial advisor, trading system, or execution engine.

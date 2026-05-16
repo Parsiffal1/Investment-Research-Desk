@@ -1,59 +1,83 @@
 # Windows CLI 使用指南
 
-本文面向普通投研报告运行，不启用 HF PEFT adapter。
+本文说明在 Windows 上运行 Investment Research Desk 的普通 CLI 流程。该流程不需要安装 LoRA 训练依赖。
 
-## 环境检查
+## 1. 安装依赖
 
 ```powershell
-cd C:\Users\saton\Documents\Codex\2026-05-14\files-mentioned-by-the-user-finsight
+cd <PROJECT_DIR>
 uv sync
-uv run ird config check
 ```
 
-如果 Ollama 未启动：
+## 2. 配置环境变量
 
 ```powershell
-ollama serve
-ollama pull qwen3:8b
+Copy-Item .env.example .env
+notepad .env
 ```
 
-`.env` 至少建议包含：
+至少建议配置：
 
 ```text
 IRD_OLLAMA_BASE_URL=http://localhost:11434/v1
 IRD_OLLAMA_MODEL=qwen3:8b
-IRD_AGENT_EXECUTION_MODE=sequential
-IRD_LLM_TIMEOUT_SEC=180
+OKX_BASE_URL=https://www.okx.com
+TAVILY_API_KEY=
+FMP_API_KEY=
+FINNHUB_API_KEY=
 ```
 
-## 运行报告
+`.env` 是本地私密文件，不要提交到 GitHub。
 
-交互式：
+## 3. 启动 Ollama
+
+```powershell
+ollama serve
+ollama pull qwen3:8b
+ollama list
+```
+
+## 4. 检查系统
+
+```powershell
+uv run ird config check
+```
+
+该命令会检查 Ollama endpoint、模型、provider 配置和 adapter runtime 状态，但不会显示真实 API key。
+
+## 5. 运行报告
+
+交互式入口：
 
 ```powershell
 uv run ird
 ```
 
-非交互式：
+非交互式报告：
 
 ```powershell
-uv run ird report --symbol NVDA --horizon short_term --llm-provider ollama
-uv run ird report --symbol ETH-USDT-SWAP --asset-class crypto --horizon short_term --llm-provider ollama
-uv run ird report --symbol SPY --horizon short_term --llm-provider ollama --language zh
+uv run ird report --symbol ETH-USDT-SWAP --asset-class crypto --horizon short_term --llm-provider ollama --language zh
 ```
 
-## 输出目录
-
-运行结束后查看：
+离线 fixture demo：
 
 ```powershell
-uv run ird runs
+uv run ird demo
 ```
 
-每个 run 会生成 `final_research_context.json`、`research_brief.md`、`trace.json`、`metrics.json` 等产物。
+## 6. 查看产物
 
-## 常见问题
+每次运行会写入：
 
-如果 `uv run pytest` 报 `.venv\lib64` 权限错误，说明当前目录曾被 WSL 创建过 Linux venv。删除或移走项目根目录 `.venv` 后重新运行 `uv run pytest`，让 Windows 重新创建自己的 venv。
+```text
+runs/{run_id}/
+```
 
-如果启用 `--sentiment-provider hf-peft` 后报缺少 `torch/transformers/peft/bitsandbytes/accelerate`，这是预期行为：Windows 普通环境默认不运行 adapter。请改用 WSL adapter 指南，或显式使用 `--sentiment-provider main`。
+核心文件：
+
+- `final_research_context.json`
+- `research_brief.md`
+- `trace.json`
+- `metrics.json`
+
+这些运行产物可能包含本地路径、外部 provider 返回内容和研究历史，默认不提交到 GitHub。
