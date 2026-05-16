@@ -42,6 +42,7 @@ from investment_research_desk.lora import LoraTrainingConfig, eval_lora_sentimen
 from investment_research_desk.persistence import RunStore
 from investment_research_desk.providers.okx import OkxMarketDataProvider
 from investment_research_desk.schemas import FinalResearchContext
+from investment_research_desk.sentiment_runtime import missing_runtime_packages
 
 console = Console()
 app = typer.Typer(
@@ -1180,6 +1181,16 @@ def _preflight_sentiment_runtime(request, settings) -> None:
         _exit_with_error(
             "Sentiment adapter path does not exist.",
             hints=[str(adapter_path), "Run `ird lora train ...` first or point to an existing PEFT adapter directory."],
+        )
+    missing = missing_runtime_packages()
+    if missing:
+        _exit_with_error(
+            "Sentiment adapter runtime dependencies are not installed in this Python environment.",
+            hints=[
+                f"Missing packages: {', '.join(missing)}",
+                "Run hf-peft adapter reports from the WSL CUDA training environment, or install the HF runtime packages in this environment.",
+                "Use --sentiment-provider main if you want to run without the adapter.",
+            ],
         )
 
 

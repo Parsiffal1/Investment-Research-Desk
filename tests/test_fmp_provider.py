@@ -51,6 +51,19 @@ def test_fmp_news_uses_symbol_scoped_stock_endpoint(monkeypatch):
     assert events[0].related_assets == ["SPY"]
 
 
+def test_fmp_news_treats_paid_endpoint_402_as_empty(monkeypatch):
+    provider = FmpProvider("test-key")
+
+    def fake_get(endpoint, params):
+        raise RuntimeError(f"FMP endpoint '{endpoint}' failed with HTTP 402")
+
+    monkeypatch.setattr(provider, "_get", fake_get)
+
+    events = provider.fetch_news(RunRequest(symbol="ETH-USDT-SWAP", asset_class="crypto"))
+
+    assert events == []
+
+
 def test_okx_market_data_skips_non_swap_equity(monkeypatch):
     provider = OkxMarketDataProvider()
 

@@ -151,6 +151,9 @@ def make_sentiment_classifier(settings: Settings, request: RunRequest) -> Sentim
     adapter_path = Path(request.sentiment_adapter_path) if request.sentiment_adapter_path else settings.sentiment_adapter_path
     if adapter_path is None:
         raise RuntimeError("IRD_SENTIMENT_ADAPTER_PATH or --sentiment-adapter-path is required for hf-peft sentiment.")
+    missing = missing_runtime_packages()
+    if missing:
+        raise RuntimeError(f"Missing sentiment adapter runtime packages: {', '.join(missing)}")
     base_model = request.sentiment_base_model or settings.sentiment_base_model or DEFAULT_SENTIMENT_BASE_MODEL
     batch_size = request.sentiment_score_batch_size or settings.sentiment_score_batch_size
     return HfPeftSentimentClassifier(base_model=base_model, adapter_path=adapter_path, score_batch_size=batch_size)
@@ -199,14 +202,19 @@ def aggregate_predictions(inputs: list[SentimentInput], predictions: list[Sentim
 
 
 def _require_runtime_packages() -> None:
+    missing = missing_runtime_packages()
+    if missing:
+        raise RuntimeError(f"Missing sentiment adapter runtime packages: {', '.join(missing)}")
+
+
+def missing_runtime_packages() -> list[str]:
     missing = []
     for package in ["torch", "transformers", "peft", "bitsandbytes", "accelerate"]:
         try:
             __import__(package)
         except ImportError:
             missing.append(package)
-    if missing:
-        raise RuntimeError(f"Missing sentiment adapter runtime packages: {', '.join(missing)}")
+    return missing
 
 
 def _score_runtime_labels(

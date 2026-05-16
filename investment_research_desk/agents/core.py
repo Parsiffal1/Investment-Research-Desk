@@ -438,7 +438,7 @@ class SentimentAnalyst:
                     ],
                 }
             except Exception as exc:
-                fallback.evidence = [f"sentiment adapter unavailable: {exc}", *fallback.evidence]
+                adapter_payload = None
         result = _llm_structured(
             self.name,
             llm,

@@ -41,7 +41,12 @@ class FmpProvider:
         endpoint = _news_endpoint(request.asset_class)
         if not symbol or not endpoint:
             return []
-        data = self._get(endpoint, {"symbols": symbol})
+        try:
+            data = self._get(endpoint, {"symbols": symbol})
+        except RuntimeError as exc:
+            if "HTTP 402" in str(exc):
+                return []
+            raise
         if not isinstance(data, list):
             return []
         events: list[NewsEvent] = []

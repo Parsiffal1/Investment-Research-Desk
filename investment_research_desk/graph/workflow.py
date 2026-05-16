@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -444,7 +445,7 @@ class ResearchWorkflow:
             return {"error": f"tool call budget exceeded for {agent_name}.{name}: max=4"}
         collected["executed_tool_count"] += 1
         per_tool_counts[name] = per_tool_counts.get(name, 0) + 1
-        query = str(arguments.get("query") or request.symbol).strip() or request.symbol
+        query = self._tool_query(name, request, arguments)
         symbol = str(arguments.get("symbol") or request.symbol).strip() or request.symbol
         local_request = request.model_copy(update={"symbol": symbol, "tool_query": query})
         result = route_to_vendor(name, self.settings, local_request)
@@ -455,9 +456,23 @@ class ResearchWorkflow:
             collected["news_events"].extend(events)
             return {"status": result.status, "warnings": result.warnings, "events": [event.model_dump(mode="json") for event in events[:12]]}
         if name == "get_sentiment_inputs":
-            inputs = result.data if isinstance(result.data, list) else []
+            raw_inputs = result.data if isinstance(result.data, list) else []
+            inputs, rejected = _filter_relevant_sentiment_inputs(raw_inputs, request)
             collected["sentiment_inputs"].extend(inputs)
-            return {"status": result.status, "warnings": result.warnings, "sentiment_inputs": [item.model_dump(mode="json") for item in inputs[:12]]}
+            collected["source_metadata"]["sentiment_filter"] = {
+                "raw_count": len(raw_inputs),
+                "kept_count": len(inputs),
+                "rejected_count": len(rejected),
+                "query": query,
+            }
+            if raw_inputs and not inputs:
+                collected["warnings"].append("sentiment relevance filter rejected all retrieved inputs")
+            return {
+                "status": result.status,
+                "warnings": result.warnings,
+                "sentiment_inputs": [item.model_dump(mode="json") for item in inputs[:12]],
+                "rejected_count": len(rejected),
+            }
         if name == "get_market_data":
             collected["ohlcv"] = result.data if isinstance(result.data, list) else []
             return {"status": result.status, "warnings": result.warnings, "bar_count": len(collected["ohlcv"])}
@@ -470,6 +485,15 @@ class ResearchWorkflow:
                 collected["source_metadata"].update(result.data)
             return {"status": result.status, "warnings": result.warnings, "fundamentals": result.data}
         return {"error": f"unsupported tool: {name}"}
+
+    @staticmethod
+    def _tool_query(name: str, request: RunRequest, arguments: dict[str, Any]) -> str:
+        query = str(arguments.get("query") or "").strip()
+        if name == "get_sentiment_inputs":
+            if not query or query.upper() == request.symbol.upper() or "SWAP" in query.upper():
+                return _default_sentiment_query(request)
+            return query
+        return query or request.symbol
 
     def _collected_tool_data(self, agent_name: str, request: RunRequest, collected: dict[str, Any]) -> NormalizedData:
         source_metadata = {
@@ -519,7 +543,7 @@ class ResearchWorkflow:
         if name in {"get_news", "get_global_news"}:
             return {"symbol": request.symbol, "query": _default_financial_query(request), "limit": 5}
         if name == "get_sentiment_inputs":
-            return {"symbol": request.symbol, "query": _default_financial_query(request)}
+            return {"symbol": request.symbol, "query": _default_sentiment_query(request)}
         return {"symbol": request.symbol}
 
     @staticmethod
@@ -1301,6 +1325,79 @@ def _default_financial_query(request: RunRequest) -> str:
     if request.asset_class == "fx":
         return f"{symbol} foreign exchange market news central bank rates macro"
     return f"{symbol} financial market news macro sector issuer"
+
+
+def _default_sentiment_query(request: RunRequest) -> str:
+    symbol = request.symbol.upper()
+    if request.asset_class == "crypto":
+        base = symbol.replace("-USDT-SWAP", "").replace("-USD-SWAP", "").replace("-USDT", "").replace("-USD", "")
+        crypto_names = {"BTC": "Bitcoin", "ETH": "Ethereum", "SOL": "Solana", "XRP": "XRP", "DOGE": "Dogecoin"}
+        name = crypto_names.get(base, base)
+        return f"{name} {base} crypto price sentiment ETF flows staking regulation liquidity"
+    if request.asset_class == "equity":
+        return f"{symbol} stock investor sentiment earnings analyst rating market discussion"
+    if request.asset_class == "equity_index":
+        return f"{symbol} ETF investor sentiment flows macro rates market discussion"
+    return _default_financial_query(request)
+
+
+def _filter_relevant_sentiment_inputs(inputs: list[SentimentInput], request: RunRequest) -> tuple[list[SentimentInput], list[SentimentInput]]:
+    kept: list[SentimentInput] = []
+    rejected: list[SentimentInput] = []
+    for item in inputs:
+        if _sentiment_input_is_relevant(item, request):
+            kept.append(item)
+        else:
+            rejected.append(item)
+    return kept, rejected
+
+
+def _sentiment_input_is_relevant(item: SentimentInput, request: RunRequest) -> bool:
+    haystack = " ".join([item.text, item.url or "", item.source]).upper()
+    tokens = _workflow_instrument_query_tokens(request)
+    if any(_contains_financial_token(haystack, token) for token in tokens):
+        return True
+    if request.asset_class == "crypto" and any(term in haystack for term in {"CRYPTO", "BLOCKCHAIN", "DEFI", "STAKING", "ETF"}):
+        return any(term in haystack for term in {"ETHEREUM", "BITCOIN", "SOLANA", "BTC", "ETH", "SOL", "ALTCOIN"})
+    return False
+
+
+def _workflow_instrument_query_tokens(request: RunRequest) -> list[str]:
+    symbol = request.symbol.upper()
+    ignored_parts = {"USD", "USDT", "USDC", "SWAP", "PERP", "PERPETUAL"}
+    parts = [part for part in re.split(r"[^A-Z0-9]+", symbol) if part and part not in ignored_parts]
+    tokens = [symbol, *parts]
+    aliases = {
+        "BTC": "BITCOIN",
+        "ETH": "ETHEREUM",
+        "SOL": "SOLANA",
+        "XAU": "GOLD",
+        "GC": "GOLD",
+        "NVDA": "NVIDIA",
+        "TSLA": "TESLA",
+        "AAPL": "APPLE",
+        "MSFT": "MICROSOFT",
+        "GOOG": "GOOGLE",
+        "GOOGL": "ALPHABET",
+        "AMZN": "AMAZON",
+        "META": "META",
+        "NFLX": "NETFLIX",
+        "AMD": "ADVANCED MICRO DEVICES",
+    }
+    for part in parts:
+        alias = aliases.get(part)
+        if alias:
+            tokens.append(alias)
+    return list(dict.fromkeys(tokens))
+
+
+def _contains_financial_token(text: str, token: str) -> bool:
+    normalized = token.upper().strip()
+    if not normalized:
+        return False
+    if " " in normalized or "-" in normalized:
+        return normalized in text
+    return re.search(rf"(?<![A-Z0-9]){re.escape(normalized)}(?![A-Z0-9])", text) is not None
 
 
 def _dedupe_news_events(events: list[NewsEvent]) -> list[NewsEvent]:

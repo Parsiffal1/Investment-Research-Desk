@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from investment_research_desk.config import load_settings
 from investment_research_desk.dataflows.interface import VendorRouteResult
 from investment_research_desk.graph import ResearchWorkflow
+from investment_research_desk.graph import workflow
 from investment_research_desk.sentiment_runtime import FakeSentimentClassifier
 from investment_research_desk.schemas import FinalResearchContext, NewsEvent, OHLCVBar, RunRequest, SentimentInput
 
@@ -241,6 +242,33 @@ def test_news_tool_call_preserves_symbol_and_passes_refined_query(tmp_path: Path
 
     assert seen[0].symbol == "SPY"
     assert seen[0].tool_query == "SPDR S&P 500 ETF Trust market news"
+
+
+def test_sentiment_relevance_filter_rejects_non_financial_swap_noise():
+    now = datetime.now(timezone.utc)
+    request = RunRequest(symbol="ETH-USDT-SWAP", asset_class="crypto")
+    inputs = [
+        SentimentInput(
+            text="How a swap line for Persian Gulf allies would break with the past",
+            source="tavily",
+            timestamp=now,
+        ),
+        SentimentInput(
+            text="Ethereum ETH market discussion turns cautious after ETF flow slowdown",
+            source="tavily",
+            timestamp=now,
+        ),
+        SentimentInput(
+            text="[StockTwits Bearish] $ETH.X would dump after regulatory headline",
+            source="stocktwits",
+            timestamp=now,
+        ),
+    ]
+
+    kept, rejected = workflow._filter_relevant_sentiment_inputs(inputs, request)
+
+    assert [item.source for item in kept] == ["tavily", "stocktwits"]
+    assert rejected[0].text.startswith("How a swap line")
 
 
 def test_default_news_tool_arguments_expand_ambiguous_spy_query():
