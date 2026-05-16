@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Investment Research Desk Hero V3</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg0: #04070c;
+      --bg1: #0a131c;
+      --bg2: #10202f;
+      --ink: #f2f7fb;
+      --soft: rgba(208, 223, 236, 0.84);
+      --muted: rgba(156, 177, 197, 0.55);
+      --line: rgba(140, 163, 184, 0.14);
+      --blue: #8eb8dd;
+      --steel: #6f8da9;
+      --teal: #6db9b7;
+      --green: #8ed0ae;
+      --red: #d88f97;
+      --amber: #d7b47a;
+      --panel: rgba(11, 20, 29, 0.9);
+      --panel-2: rgba(13, 24, 35, 0.96);
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+      --sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      color: white;
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    .stage {
+      position: fixed;
+      top: 50%; left: 50%;
+      width: 1920px; height: 1080px;
+      transform: translate(-50%, -50%);
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 14% 18%, rgba(142,184,221,0.10), transparent 28%),
+        radial-gradient(circle at 80% 70%, rgba(109,185,183,0.08), transparent 24%),
+        radial-gradient(circle at 52% 118%, rgba(51,74,102,0.18), transparent 44%),
+        linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 50%, var(--bg0) 100%);
+    }
+    .grid, .glow, .footer-band { position: absolute; inset: 0; pointer-events: none; }
+    .grid {
+      background-image:
+        linear-gradient(to right, rgba(146,170,191,0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(146,170,191,0.045) 1px, transparent 1px);
+      background-size: 124px 124px;
+      opacity: 0.38;
+      mask-image: linear-gradient(180deg, rgba(255,255,255,0.68), rgba(255,255,255,0.16) 74%, transparent 100%);
+    }
+    .glow::before, .glow::after {
+      content: "";
+      position: absolute;
+      border-radius: 999px;
+      filter: blur(64px);
+      opacity: 0.22;
+    }
+    .glow::before {
+      left: 110px; top: 132px;
+      width: 360px; height: 180px;
+      background: rgba(142,184,221,0.14);
+    }
+    .glow::after {
+      right: 150px; bottom: 132px;
+      width: 340px; height: 190px;
+      background: rgba(109,185,183,0.12);
+    }
+    .gif-export .glow::before, .gif-export .glow::after {
+      filter: blur(48px);
+      opacity: 0.16;
+    }
+
+    .eyebrow {
+      position: absolute;
+      left: 50%; top: 92px;
+      transform: translateX(-50%);
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(177, 201, 221, 0.14);
+      background: rgba(8, 16, 24, 0.62);
+      color: rgba(209, 223, 236, 0.84);
+      font: 600 15px/1 var(--mono);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      opacity: 0;
+    }
+    .title {
+      position: absolute;
+      left: 50%; top: 322px;
+      transform: translate(-50%, -50%);
+      font-size: 118px;
+      font-weight: 770;
+      letter-spacing: -0.062em;
+      white-space: nowrap;
+      color: var(--ink);
+      opacity: 0;
+    }
+    .title .accent {
+      background: linear-gradient(90deg, #f2f7fb 0%, #b8d2e6 32%, #8db3c7 68%, #d8bf93 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .subtitle {
+      position: absolute;
+      left: 50%; top: 470px;
+      width: 1100px;
+      transform: translateX(-50%);
+      text-align: center;
+      color: var(--soft);
+      font-size: 28px;
+      line-height: 1.4;
+      letter-spacing: -0.02em;
+      opacity: 0;
+    }
+
+    .market-field {
+      position: absolute;
+      left: 50%; top: 176px;
+      width: 1500px; height: 740px;
+      transform: translateX(-50%);
+      opacity: 0;
+    }
+    .market-shell {
+      position: absolute;
+      inset: 54px 84px 62px;
+      border-radius: 30px;
+      border: 1px solid rgba(171, 196, 217, 0.14);
+      background: linear-gradient(180deg, rgba(11,20,30,0.90), rgba(10,18,27,0.74));
+      box-shadow: 0 34px 92px rgba(0,0,0,0.28);
+      overflow: hidden;
+    }
+    .gif-export .market-shell { background: linear-gradient(180deg, rgba(11,20,30,0.96), rgba(10,18,27,0.86)); }
+    .market-head {
+      position: absolute;
+      left: 28px; right: 28px; top: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 3;
+      gap: 20px;
+    }
+    .market-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(174,199,220,0.14);
+      background: rgba(8,16,25,0.74);
+      color: rgba(236,244,250,0.96);
+      font: 700 12px/1 var(--mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .market-badge .dot {
+      width: 8px; height: 8px; border-radius: 999px;
+      background: var(--blue);
+      box-shadow: 0 0 12px rgba(142,184,221,0.5);
+    }
+    .ticker-strip {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .ticker {
+      padding: 9px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(174,199,220,0.12);
+      background: rgba(255,255,255,0.03);
+      color: rgba(228,238,246,0.94);
+      font: 600 12px/1 var(--mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .ticker.up { color: #aad8be; }
+    .ticker.down { color: #deb1b7; }
+
+    .chart {
+      position: absolute;
+      inset: 88px 44px 44px;
+      z-index: 1;
+    }
+    .chart svg { width: 100%; height: 100%; overflow: visible; }
+    .axis { stroke: rgba(150,171,191,0.12); stroke-width: 1; }
+    .price-path { fill: none; stroke: rgba(155, 189, 216, 0.92); stroke-width: 4.2; stroke-linecap: round; stroke-linejoin: round; }
+    .macro-path { fill: none; stroke: rgba(215, 180, 122, 0.80); stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+    .candle-stem { stroke-width: 2.1; stroke-linecap: round; }
+    .candle-body { rx: 4; }
+    .kline-zone {
+      fill: rgba(142,184,221,0.06);
+      stroke: rgba(142,184,221,0.12);
+      stroke-width: 1;
+    }
+
+    .note {
+      position: absolute;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(173,198,219,0.12);
+      background: rgba(8,16,25,0.82);
+      box-shadow: 0 18px 44px rgba(0,0,0,0.20);
+      width: 220px;
+      z-index: 2;
+    }
+    .note b {
+      display: block;
+      color: rgba(241,247,252,0.96);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .note span {
+      display: block;
+      color: var(--soft);
+      font-size: 13px;
+      line-height: 1.42;
+    }
+
+    .context-board {
+      position: absolute;
+      left: 50%; top: 206px;
+      width: 1220px; height: 620px;
+      transform: translateX(-50%);
+      opacity: 0;
+    }
+    .board-shell {
+      position: absolute;
+      inset: 0;
+      border-radius: 30px;
+      border: 1px solid rgba(174,199,220,0.14);
+      background: linear-gradient(180deg, rgba(12,22,33,0.96), rgba(9,17,26,0.98));
+      box-shadow: 0 36px 106px rgba(0,0,0,0.32);
+      overflow: hidden;
+    }
+    .board-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 26px 30px 18px;
+      border-bottom: 1px solid rgba(174,199,220,0.10);
+    }
+    .board-title b {
+      display: block;
+      color: rgba(242,247,251,0.98);
+      font-size: 30px;
+      font-weight: 760;
+      letter-spacing: -0.03em;
+    }
+    .board-title span {
+      display: block;
+      margin-top: 8px;
+      color: var(--soft);
+      font-size: 14px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .head-pill {
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(174,199,220,0.12);
+      background: rgba(255,255,255,0.03);
+      color: rgba(228,238,246,0.92);
+      font: 600 12px/1 var(--mono);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      display: inline-block;
+      margin-left: 10px;
+    }
+    .board-body {
+      display: grid;
+      grid-template-columns: 1fr 0.92fr;
+      gap: 18px;
+      padding: 22px 24px 24px;
+      height: calc(100% - 95px);
+    }
+    .panel {
+      border-radius: 22px;
+      border: 1px solid rgba(174,199,220,0.10);
+      background: rgba(255,255,255,0.025);
+      padding: 18px 20px;
+    }
+    .panel h3 {
+      margin: 0 0 14px;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(231,241,249,0.96);
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat {
+      padding: 15px 14px 13px;
+      border-radius: 16px;
+      background: rgba(7,15,23,0.84);
+      border: 1px solid rgba(174,199,220,0.10);
+    }
+    .stat b {
+      display: block;
+      color: rgba(239,247,252,0.96);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .stat span {
+      display: block;
+      color: var(--soft);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .stat span.up { color: #a9d9be; }
+    .stat span.warn { color: #d9bf93; }
+    .copy {
+      display: grid;
+      gap: 10px;
+    }
+    .copy p {
+      margin: 0;
+      color: rgba(213,228,240,0.88);
+      font-size: 14px;
+      line-height: 1.56;
+    }
+    .artifact-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .artifact {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 14px;
+      border-radius: 14px;
+      background: rgba(7,15,23,0.84);
+      border: 1px solid rgba(174,199,220,0.10);
+    }
+    .artifact b {
+      color: rgba(238,246,252,0.96);
+      font-size: 13px;
+      letter-spacing: 0.04em;
+    }
+    .artifact span {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+    .footer-band {
+      top: auto;
+      bottom: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      color: rgba(212,226,239,0.82);
+      font-size: 17px;
+      letter-spacing: -0.01em;
+      opacity: 0;
+    }
+    .footer-band strong { color: rgba(244,248,252,0.98); }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <div class="grid"></div>
+    <div class="glow"></div>
+
+    <div class="eyebrow" id="eyebrow">FINANCE · BANK-GRADE · RESEARCH WORKFLOW</div>
+    <div class="title" id="title">Investment <span class="accent">Research Desk</span></div>
+    <div class="subtitle" id="subtitle">A local-first financial research assistant built to read market structure, macro pressure, and disagreement before compressing them into calm, inspectable context.</div>
+
+    <section class="market-field" id="marketField">
+      <div class="market-shell"></div>
+      <div class="market-head">
+        <div class="market-badge"><span class="dot"></span> Institutional market view</div>
+        <div class="ticker-strip">
+          <div class="ticker up">SPY +0.34%</div>
+          <div class="ticker up">QQQ +0.41%</div>
+          <div class="ticker">ETH-USDT-SWAP</div>
+          <div class="ticker">funding / oi</div>
+          <div class="ticker down">cpi risk</div>
+        </div>
+      </div>
+      <div class="chart">
+        <svg viewBox="0 0 1328 564" preserveAspectRatio="none" aria-hidden="true">
+          <g opacity="0.55">
+            <line class="axis" x1="0" y1="472" x2="1328" y2="472" />
+            <line class="axis" x1="0" y1="364" x2="1328" y2="364" />
+            <line class="axis" x1="0" y1="256" x2="1328" y2="256" />
+            <line class="axis" x1="0" y1="148" x2="1328" y2="148" />
+            <line class="axis" x1="0" y1="40" x2="1328" y2="40" />
+          </g>
+          <path class="kline-zone" d="M36 312 C146 282, 218 204, 334 214 C446 224, 536 322, 650 310 C760 298, 850 184, 978 196 C1094 208, 1198 256, 1290 222 L1290 470 L36 470 Z" />
+          <g id="candles"></g>
+          <path class="price-path" id="pricePath" d="M36 300 C148 272, 220 194, 336 206 C446 218, 532 316, 648 302 C758 288, 846 176, 974 188 C1088 200, 1190 246, 1290 212" />
+          <path class="macro-path" id="macroPath" d="M36 136 C128 150, 218 128, 320 110 C412 94, 520 104, 626 142 C722 176, 818 196, 920 182 C1022 168, 1130 126, 1290 108" />
+        </svg>
+      </div>
+      <div class="note" id="noteA" style="left: 118px; top: 210px;"><b>K-line structure</b><span>Market shape stays visible as first-class evidence instead of being flattened into a generic answer.</span></div>
+      <div class="note" id="noteB" style="right: 132px; top: 190px;"><b>Macro pressure</b><span>Rates, CPI, and cross-asset stress bend the interpretation layer before any directional view is formed.</span></div>
+    </section>
+
+    <section class="context-board" id="contextBoard">
+      <div class="board-shell">
+        <div class="board-head">
+          <div class="board-title">
+            <b>Final Research Context</b>
+            <span>Research support · not execution infrastructure</span>
+          </div>
+          <div>
+            <span class="head-pill">equities + crypto</span>
+            <span class="head-pill">trace / metrics / artifacts</span>
+          </div>
+        </div>
+        <div class="board-body">
+          <div class="panel">
+            <h3>Research output shape</h3>
+            <div class="stats">
+              <div class="stat"><b>Directional view</b><span class="up">constructive, selective</span></div>
+              <div class="stat"><b>Risk level</b><span class="warn">macro-sensitive</span></div>
+              <div class="stat"><b>Confidence</b><span>evidence-weighted</span></div>
+            </div>
+            <div class="copy">
+              <p>This workflow is designed to feel closer to institutional research than retail trading software: fewer impulsive signals, more structure, more context, and clearer uncertainty.</p>
+              <p>It watches K-line motion, macro pressure, and opposing arguments, then compresses them into a calmer research object that a human can actually review after the run.</p>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Run artifacts</h3>
+            <div class="artifact-list">
+              <div class="artifact"><b>final_research_context.json</b><span>core context object</span></div>
+              <div class="artifact"><b>research_brief.md</b><span>human-readable summary</span></div>
+              <div class="artifact"><b>trace.json</b><span>agent / tool visibility</span></div>
+              <div class="artifact"><b>metrics.json</b><span>runtime telemetry</span></div>
+            </div>
+            <div class="copy" style="margin-top:16px;">
+              <p><strong>Research context only.</strong> No order placement, no account access, no execution instruction, and no portfolio action.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-band" id="footerBand"><strong>Research context only.</strong> Built for professional market reading before action.</div>
+  </div>
+
+  <script>
+    const DURATION = 10.5;
+    const stage = document.getElementById('stage');
+    if (window.__gifExport) stage.classList.add('gif-export');
+
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const easeOut = t => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+    const easeInOut = t => {
+      t = clamp(t, 0, 1);
+      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    };
+    const between = (t, a, b) => clamp((t - a) / (b - a), 0, 1);
+
+    const eyebrow = document.getElementById('eyebrow');
+    const title = document.getElementById('title');
+    const subtitle = document.getElementById('subtitle');
+    const marketField = document.getElementById('marketField');
+    const contextBoard = document.getElementById('contextBoard');
+    const footerBand = document.getElementById('footerBand');
+    const notes = [...document.querySelectorAll('.note')];
+    const tickers = [...document.querySelectorAll('.ticker')];
+
+    const candleGroup = document.getElementById('candles');
+    const candlesData = [
+      [76, 310, 282, 326, 292], [128, 292, 258, 306, 268], [180, 268, 240, 284, 254], [232, 254, 236, 278, 270],
+      [284, 270, 248, 292, 258], [336, 258, 226, 272, 238], [388, 238, 214, 252, 226], [440, 226, 208, 246, 240],
+      [492, 240, 220, 262, 230], [544, 230, 202, 244, 214], [596, 214, 188, 228, 198], [648, 198, 176, 216, 206],
+      [700, 206, 186, 226, 194], [752, 194, 166, 208, 176], [804, 176, 152, 194, 164], [856, 164, 144, 184, 176],
+      [908, 176, 156, 198, 166], [960, 166, 144, 182, 152], [1012, 152, 132, 170, 142], [1064, 142, 124, 160, 150],
+      [1116, 150, 132, 172, 142], [1168, 142, 126, 162, 136], [1220, 136, 118, 154, 128]
+    ];
+    candleGroup.innerHTML = candlesData.map(([x,o,h,l,c]) => {
+      const up = c < o;
+      const color = up ? 'rgba(142,208,174,0.92)' : 'rgba(216,143,151,0.88)';
+      const y = Math.min(o,c);
+      const hBody = Math.max(8, Math.abs(c-o));
+      return `<g opacity="0.95"><line class="candle-stem" x1="${x}" y1="${h}" x2="${x}" y2="${l}" stroke="${color}"/><rect class="candle-body" x="${x-7}" y="${y}" width="14" height="${hBody}" fill="${color}"/></g>`;
+    }).join('');
+
+    const pricePath = document.getElementById('pricePath');
+    const macroPath = document.getElementById('macroPath');
+    const pathEls = [pricePath, macroPath];
+    const pathLens = pathEls.map(el => el.getTotalLength());
+    pathEls.forEach((el, i) => {
+      el.style.strokeDasharray = pathLens[i];
+      el.style.strokeDashoffset = pathLens[i];
+    });
+
+    function sceneOpacity(t, start, end, fade = 0.78) {
+      const inn = easeOut(between(t, start, start + fade));
+      const out = 1 - easeInOut(between(t, end - fade, end));
+      return clamp(inn * out, 0, 1);
+    }
+
+    function update(t) {
+      t = ((t % DURATION) + DURATION) % DURATION;
+
+      const introIn = easeOut(between(t, 0.08, 1.18));
+      const introOut = 1 - easeInOut(between(t, 1.9, 2.6));
+      const intro = clamp(introIn * introOut, 0, 1);
+      eyebrow.style.opacity = intro.toFixed(3);
+      eyebrow.style.transform = `translateX(-50%) translateY(${lerp(18, 0, introIn)}px)`;
+      title.style.opacity = intro.toFixed(3);
+      title.style.transform = `translate(-50%, -50%) translateY(${lerp(38, 0, introIn)}px) scale(${lerp(0.988, 1, introIn)})`;
+      subtitle.style.opacity = (intro * 0.97).toFixed(3);
+      subtitle.style.transform = `translateX(-50%) translateY(${lerp(24, 0, introIn)}px)`;
+
+      const fieldStart = 2.0, fieldEnd = 7.2;
+      const fieldVis = sceneOpacity(t, fieldStart, fieldEnd, 0.92);
+      marketField.style.opacity = fieldVis.toFixed(3);
+      marketField.style.transform = `translateX(-50%) translateY(${lerp(30, 0, easeOut(between(t, fieldStart, fieldStart + 0.95)))}px)`;
+
+      const p1 = easeOut(between(t, 2.25, 4.1));
+      const p2 = easeOut(between(t, 2.55, 4.4));
+      pricePath.style.strokeDashoffset = String(pathLens[0] * (1 - p1));
+      macroPath.style.strokeDashoffset = String(pathLens[1] * (1 - p2));
+
+      tickers.forEach((el, i) => {
+        const p = easeOut(between(t, 2.05 + i * 0.08, 2.85 + i * 0.08));
+        el.style.opacity = String(fieldVis * p);
+        el.style.transform = `translateY(${lerp(12, 0, p)}px)`;
+      });
+      notes.forEach((el, i) => {
+        const p = easeOut(between(t, 3.45 + i * 0.18, 4.35 + i * 0.18));
+        el.style.opacity = String(fieldVis * p);
+        el.style.transform = `translate(${lerp(i === 0 ? -16 : 16, 0, p)}px, ${lerp(14, 0, p)}px)`;
+      });
+
+      const fieldFade = 1 - easeInOut(between(t, 6.15, 7.2));
+      marketField.style.opacity = String(fieldVis * fieldFade);
+
+      const boardStart = 6.3, boardEnd = 10.2;
+      const boardVis = sceneOpacity(t, boardStart, boardEnd, 0.86);
+      contextBoard.style.opacity = boardVis.toFixed(3);
+      contextBoard.style.transform = `translateX(-50%) translateY(${lerp(34, 0, easeOut(between(t, boardStart, boardStart + 0.85)))}px) scale(${lerp(0.988, 1, boardVis)})`;
+
+      const footerIn = easeOut(between(t, 8.0, 9.15));
+      const footerOut = 1 - easeInOut(between(t, 10.0, 10.5));
+      const footer = clamp(footerIn * footerOut, 0, 1);
+      footerBand.style.opacity = footer.toFixed(3);
+      footerBand.style.transform = `translateY(${lerp(16, 0, footerIn)}px)`;
+    }
+
+    let start = performance.now();
+    function tick(now) {
+      const sec = (now - start) / 1000;
+      update(sec);
+      requestAnimationFrame(tick);
+    }
+
+    window.__seek = function(sec) {
+      start = performance.now() - sec * 1000;
+      update(sec);
+    };
+
+    document.fonts.ready.then(() => {
+      requestAnimationFrame(() => {
+        window.__ready = true;
+        requestAnimationFrame(tick);
+      });
+    });
+  </script>
+</body>
+</html>

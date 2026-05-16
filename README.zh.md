@@ -22,7 +22,7 @@
 ---
 
 <p align="center">
-  <img src="docs/assets/investment-research-desk-hero-v2.gif" alt="Investment Research Desk hero animation" width="100%">
+  <img src="docs/assets/investment-research-desk-hero-v3.gif" alt="Investment Research Desk hero animation" width="100%">
 </p>
 
 <div align="center">
