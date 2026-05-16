@@ -3,7 +3,7 @@
 <div align="center">
   <h1>Investment Research Desk / 投研策略台</h1>
   <p><strong>一个面向股票和加密资产的本地优先多 Agent 投研工作台。</strong></p>
-  <p>把市场数据、新闻、宏观事件、情绪输入、技术结构、可选 QLoRA 微调能力和 Bull / Bear 辩论整理成结构化投研材料，方便人工复核和后续研究消费。</p>
+  <p>把市场数据、新闻、宏观事件、情绪输入、技术结构、可选 QLoRA 微调能力和 Bull / Bear 辩论整理成结构化材料，方便人工复核和后续研究消费。</p>
   <p>
     <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue" />
     <img alt="CLI" src="https://img.shields.io/badge/interface-CLI-black" />
