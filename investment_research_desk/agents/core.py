@@ -705,6 +705,7 @@ class ResearchReporter:
         risk_level = _risk_level(risk, technical)
         key_drivers = _dedupe(constructive.evidence + fundamental.key_drivers + news.dominant_events)[:6]
         key_risks = _dedupe(risk.evidence + fundamental.concerns)[:6]
+        language = str(data.source_metadata.get("language", "en")).strip().lower()
         fallback = FinalResearchContext(
             symbol=data.symbol,
             asset_class=data.asset_class,
@@ -759,16 +760,27 @@ class ResearchReporter:
                 "bear_researcher": risk.model_dump(mode="json"),
                 "research_debate": research_debate,
                 "warnings": warnings,
-                "language": data.source_metadata.get("language", "en"),
-                "instruction": (
-                    "Use the debate handoff and evidence-quality notes when assigning directional_view and risk_level. "
-                    "If direct evidence is thin or sentiment/news is noisy, explicitly discount confidence. "
-                    "If language is 'zh', write all human-readable summaries, rationale, cases, risks, and conditions in Chinese; keep schema keys unchanged."
-                ),
+                "language": language,
+                "instruction": _reporter_instruction(language),
             },
             FinalResearchContext,
             fallback,
         )
+
+
+def _reporter_instruction(language: str) -> str:
+    base = (
+        "Use the debate handoff and evidence-quality notes when assigning directional_view and risk_level. "
+        "If direct evidence is thin or sentiment/news is noisy, explicitly discount confidence."
+    )
+    if language == "zh":
+        return (
+            f"{base} Translate and rewrite every human-readable final report field into concise professional Chinese, "
+            "including summaries, rationale, constructive_case, risk_case, key_drivers, key_risks, uncertainty_factors, "
+            "conditions, evidence, downstream_agent_context, and usage_constraints. Keep JSON schema keys and controlled "
+            "enum values such as directional_view, balanced_view, and risk_level unchanged."
+        )
+    return base
 
 
 def _llm_structured(

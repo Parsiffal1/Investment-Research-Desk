@@ -956,13 +956,13 @@ def _print_console_report(state: dict) -> None:
     executive.add_column(ratio=1)
     executive.add_column(ratio=3)
     executive.add_row(t["symbol"], final.symbol)
-    executive.add_row(t["directional_view"], f"[{_direction_style(final.directional_view)}]{final.directional_view.upper()}[/]")
+    executive.add_row(t["directional_view"], f"[{_direction_style(final.directional_view)}]{_display_report_value(final.directional_view, language).upper()}[/]")
     executive.add_row(t["directional_rationale"], _console_safe(final.directional_rationale))
-    executive.add_row(t["balanced_view"], final.balanced_view)
-    executive.add_row(t["risk_level"], final.risk_level)
+    executive.add_row(t["balanced_view"], _display_report_value(final.balanced_view, language))
+    executive.add_row(t["risk_level"], _display_report_value(final.risk_level, language))
     executive.add_row(t["confidence"], str(final.confidence))
-    executive.add_row(t["horizon"], final.horizon)
-    executive.add_row(t["market_regime"], final.market_regime)
+    executive.add_row(t["horizon"], _display_report_value(final.horizon, language))
+    executive.add_row(t["market_regime"], _display_report_value(final.market_regime, language))
     console.print(
         Panel(
             executive,
@@ -975,42 +975,42 @@ def _print_console_report(state: dict) -> None:
     console.print(
         Group(
             _agent_panel(
-                "Fundamental / Macro Analyst",
+                t["fundamental_title"],
                 [
-                    ("View", fundamental.get("fundamental_view")),
-                    ("Confidence", fundamental.get("confidence")),
-                    ("Key Drivers", _plain_list(fundamental.get("key_drivers"))),
-                    ("Concerns", _plain_list(fundamental.get("concerns"))),
-                    ("Evidence", _plain_list(fundamental.get("evidence"))),
+                    (t["view"], _display_report_value(fundamental.get("fundamental_view"), language)),
+                    (t["confidence"], fundamental.get("confidence")),
+                    (t["key_drivers"], _plain_list(fundamental.get("key_drivers"))),
+                    (t["concerns"], _plain_list(fundamental.get("concerns"))),
+                    (t["evidence"], _plain_list(fundamental.get("evidence"))),
                 ],
             ),
             _agent_panel(
-                "News / Macro Impact Analyst",
+                t["news_title"],
                 [
-                    ("Impact Logic", news.get("impact_logic")),
-                    ("Confidence", news.get("confidence")),
-                    ("Asset Impact", (news.get("asset_impact") or {}).get(final.symbol, "mixed")),
-                    ("Dominant Events", _plain_list(news.get("dominant_events"))),
-                    ("Evidence", _plain_list(news.get("evidence"))),
+                    (t["impact_logic"], news.get("impact_logic")),
+                    (t["confidence"], news.get("confidence")),
+                    (t["asset_impact"], _display_report_value((news.get("asset_impact") or {}).get(final.symbol, "mixed"), language)),
+                    (t["dominant_events"], _plain_list(news.get("dominant_events"))),
+                    (t["evidence"], _plain_list(news.get("evidence"))),
                 ],
             ),
             _agent_panel(
-                "Sentiment Analyst",
+                t["sentiment_title"],
                 [
-                    ("Crowd Mood", sentiment.get("crowd_mood")),
-                    ("Label", sentiment.get("sentiment_label")),
-                    ("Score", sentiment.get("sentiment_score")),
-                    ("Confidence", sentiment.get("confidence")),
-                    ("Evidence", _plain_list(sentiment.get("evidence"))),
+                    (t["crowd_mood"], sentiment.get("crowd_mood")),
+                    (t["label"], _display_report_value(sentiment.get("sentiment_label"), language)),
+                    (t["score"], sentiment.get("sentiment_score")),
+                    (t["confidence"], sentiment.get("confidence")),
+                    (t["evidence"], _plain_list(sentiment.get("evidence"))),
                 ],
             ),
             _agent_panel(
-                "Technical Analyst",
+                t["technical_title"],
                 [
-                    ("View", technical.get("technical_view")),
-                    ("Trend", technical.get("trend")),
-                    ("Momentum", technical.get("momentum")),
-                    ("Volatility", technical.get("volatility_regime")),
+                    (t["view"], _display_report_value(technical.get("technical_view"), language)),
+                    (t["trend"], _display_report_value(technical.get("trend"), language)),
+                    (t["momentum"], _display_report_value(technical.get("momentum"), language)),
+                    (t["volatility"], _display_report_value(technical.get("volatility_regime"), language)),
                     ("RSI 14", technical.get("rsi_14")),
                     ("MACD", technical.get("macd_state")),
                     ("ATR 14", technical.get("atr_14")),
@@ -1025,21 +1025,21 @@ def _print_console_report(state: dict) -> None:
                 ],
             ),
             _agent_panel(
-                "Bull / Constructive Researcher",
+                t["bull_title"],
                 [
-                    ("Thesis", constructive.get("thesis")),
-                    ("Evidence", _plain_list(constructive.get("evidence"))),
-                    ("Conditions", _plain_list(constructive.get("conditions"))),
-                    ("Confidence", constructive.get("confidence")),
+                    (t["thesis"], constructive.get("thesis")),
+                    (t["evidence"], _plain_list(constructive.get("evidence"))),
+                    (t["conditions"], _plain_list(constructive.get("conditions"))),
+                    (t["confidence"], constructive.get("confidence")),
                 ],
             ),
             _agent_panel(
-                "Bear / Risk Researcher",
+                t["bear_title"],
                 [
-                    ("Thesis", risk.get("thesis")),
-                    ("Evidence", _plain_list(risk.get("evidence"))),
-                    ("Conditions", _plain_list(risk.get("conditions"))),
-                    ("Confidence", risk.get("confidence")),
+                    (t["thesis"], risk.get("thesis")),
+                    (t["evidence"], _plain_list(risk.get("evidence"))),
+                    (t["conditions"], _plain_list(risk.get("conditions"))),
+                    (t["confidence"], risk.get("confidence")),
                 ],
             ),
             _agent_panel(
@@ -1066,16 +1066,16 @@ def _print_console_report(state: dict) -> None:
             _agent_panel(
                 t["data_metadata"],
                 [
-                    ("OHLCV Bars", len(data.get("ohlcv") or [])),
-                    ("Market Context Sections", ", ".join((data.get("market_context") or {}).keys()) or "None"),
-                    ("News Events", len(data.get("news_events") or [])),
-                    ("Sentiment Inputs", len(data.get("sentiment_inputs") or [])),
-                    ("Provider Mode", (data.get("source_metadata") or {}).get("provider_mode", "unknown")),
-                    ("Tool Policy", (data.get("source_metadata") or {}).get("tool_call_policy", "unknown")),
-                    ("Agent Execution", (data.get("source_metadata") or {}).get("agent_execution_mode", "unknown")),
-                    ("Provider Warnings", _plain_list((data.get("source_metadata") or {}).get("agent_tool_warnings"))),
-                    ("Sentiment Runtime", (data.get("source_metadata") or {}).get("sentiment_runtime", "main")),
-                    ("Guardrail Violations", ", ".join(metrics.get("guardrail_violations") or []) or "None"),
+                    (t["ohlcv_bars"], len(data.get("ohlcv") or [])),
+                    (t["market_context_sections"], ", ".join((data.get("market_context") or {}).keys()) or "None"),
+                    (t["news_events"], len(data.get("news_events") or [])),
+                    (t["sentiment_inputs"], len(data.get("sentiment_inputs") or [])),
+                    (t["provider_mode"], (data.get("source_metadata") or {}).get("provider_mode", "unknown")),
+                    (t["tool_policy"], (data.get("source_metadata") or {}).get("tool_call_policy", "unknown")),
+                    (t["agent_execution"], (data.get("source_metadata") or {}).get("agent_execution_mode", "unknown")),
+                    (t["provider_warnings"], _plain_list((data.get("source_metadata") or {}).get("agent_tool_warnings"))),
+                    (t["sentiment_runtime"], (data.get("source_metadata") or {}).get("sentiment_runtime", "main")),
+                    (t["guardrail_violations"], ", ".join(metrics.get("guardrail_violations") or []) or "None"),
                 ],
             ),
             _agent_panel(
@@ -1102,6 +1102,26 @@ def _report_labels(language: str) -> dict[str, str]:
             "confidence": "置信度",
             "horizon": "研究周期",
             "market_regime": "市场状态",
+            "fundamental_title": "基本面/宏观分析师",
+            "news_title": "新闻/宏观影响分析师",
+            "sentiment_title": "情绪分析师",
+            "technical_title": "技术分析师",
+            "bull_title": "建设性研究员",
+            "bear_title": "风险研究员",
+            "view": "观点",
+            "concerns": "担忧事项",
+            "evidence": "证据",
+            "impact_logic": "影响逻辑",
+            "asset_impact": "资产影响",
+            "dominant_events": "主要事件",
+            "crowd_mood": "市场情绪",
+            "label": "标签",
+            "score": "分数",
+            "trend": "趋势",
+            "momentum": "动量",
+            "volatility": "波动状态",
+            "thesis": "核心论点",
+            "conditions": "成立条件",
             "research_reporter": "最终研究报告",
             "fundamental_summary": "基本面/宏观摘要",
             "news_summary": "新闻影响摘要",
@@ -1116,6 +1136,16 @@ def _report_labels(language: str) -> dict[str, str]:
             "evidence_quality": "证据质量说明",
             "reporter_handoff": "报告交接说明",
             "data_metadata": "数据与运行元信息",
+            "ohlcv_bars": "OHLCV K线数量",
+            "market_context_sections": "市场上下文模块",
+            "news_events": "新闻事件数量",
+            "sentiment_inputs": "情绪输入数量",
+            "provider_mode": "数据源模式",
+            "tool_policy": "工具策略",
+            "agent_execution": "Agent执行模式",
+            "provider_warnings": "数据源警告",
+            "sentiment_runtime": "情绪运行时",
+            "guardrail_violations": "护栏违规",
             "usage_boundary": "使用边界",
             "constraints": "约束",
             "downstream": "下游使用说明",
@@ -1131,6 +1161,26 @@ def _report_labels(language: str) -> dict[str, str]:
         "confidence": "Confidence",
         "horizon": "Horizon",
         "market_regime": "Market Regime",
+        "fundamental_title": "Fundamental / Macro Analyst",
+        "news_title": "News / Macro Impact Analyst",
+        "sentiment_title": "Sentiment Analyst",
+        "technical_title": "Technical Analyst",
+        "bull_title": "Bull / Constructive Researcher",
+        "bear_title": "Bear / Risk Researcher",
+        "view": "View",
+        "concerns": "Concerns",
+        "evidence": "Evidence",
+        "impact_logic": "Impact Logic",
+        "asset_impact": "Asset Impact",
+        "dominant_events": "Dominant Events",
+        "crowd_mood": "Crowd Mood",
+        "label": "Label",
+        "score": "Score",
+        "trend": "Trend",
+        "momentum": "Momentum",
+        "volatility": "Volatility",
+        "thesis": "Thesis",
+        "conditions": "Conditions",
         "research_reporter": "Research Reporter",
         "fundamental_summary": "Fundamental Summary",
         "news_summary": "News Impact Summary",
@@ -1145,6 +1195,16 @@ def _report_labels(language: str) -> dict[str, str]:
         "evidence_quality": "Evidence Quality Notes",
         "reporter_handoff": "Reporter Handoff",
         "data_metadata": "Data And Run Metadata",
+        "ohlcv_bars": "OHLCV Bars",
+        "market_context_sections": "Market Context Sections",
+        "news_events": "News Events",
+        "sentiment_inputs": "Sentiment Inputs",
+        "provider_mode": "Provider Mode",
+        "tool_policy": "Tool Policy",
+        "agent_execution": "Agent Execution",
+        "provider_warnings": "Provider Warnings",
+        "sentiment_runtime": "Sentiment Runtime",
+        "guardrail_violations": "Guardrail Violations",
         "usage_boundary": "Usage Boundary",
         "constraints": "Constraints",
         "downstream": "Downstream Context",
@@ -1182,6 +1242,43 @@ def _plain_report_text(markdown_text: str) -> Text:
 
 def _direction_style(direction: str) -> str:
     return "green" if direction == "bullish" else "red"
+
+
+def _display_report_value(value: Any, language: str) -> str:
+    text = str(value)
+    if language != "zh":
+        return text
+    mapping = {
+        "bullish": "看多",
+        "bearish": "看空",
+        "neutral": "中性",
+        "mixed": "分歧",
+        "mixed_to_bullish": "分歧偏多",
+        "mixed_to_bearish": "分歧偏空",
+        "neutral_to_bullish": "中性偏多",
+        "neutral_to_bearish": "中性偏空",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "unknown": "未知",
+        "short_term": "短期",
+        "medium_term": "中期",
+        "intraday": "日内",
+        "swing": "波段",
+        "crypto": "加密资产",
+        "equity": "股票",
+        "equity_index": "股票指数",
+        "precious_metal": "贵金属",
+        "commodity": "大宗商品",
+        "fx": "外汇",
+        "other": "其他",
+        "uptrend": "上行趋势",
+        "downtrend": "下行趋势",
+        "sideways": "震荡",
+        "positive": "正向",
+        "negative": "负向",
+    }
+    return mapping.get(text, text)
 
 
 def _print_artifact_contract(state: dict) -> None:

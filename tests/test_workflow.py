@@ -51,6 +51,26 @@ def test_fixture_workflow_creates_artifacts(tmp_path: Path):
     assert len(state["research_debate"]["rounds"]) == 4
 
 
+def test_chinese_report_uses_chinese_static_report_labels(tmp_path: Path):
+    workflow = ResearchWorkflow(settings=load_settings(), runs_dir=tmp_path)
+    request = RunRequest(
+        symbol="XAU-USDT-SWAP",
+        asset_class="precious_metal",
+        fixture="gold_cpi",
+        llm_provider="fake",
+        language="zh",
+    )
+
+    state = workflow.run(request, checkpoint=False)
+    report = (tmp_path / state["run_id"] / "research_brief.md").read_text(encoding="utf-8")
+
+    assert "## 执行摘要" in report
+    assert "## 最终研究报告" in report
+    assert "- 方向判断:" in report
+    assert "## Final Research Reporter" not in report
+    assert "- Directional view:" not in report
+
+
 def test_resume_from_checkpoint_completes(tmp_path: Path):
     settings = load_settings()
     workflow = ResearchWorkflow(settings=settings, runs_dir=tmp_path)

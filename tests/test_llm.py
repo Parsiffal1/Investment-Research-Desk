@@ -80,6 +80,29 @@ def test_analysis_and_research_agents_call_llm():
     assert "indicator_results" in called_agents
 
 
+def test_research_reporter_language_prompt_is_layered():
+    data = FixtureProvider().load("gold_cpi")
+    llm = FakeLLMClient()
+    fundamental = FundamentalMacroAnalyst().run(data, llm)
+    news = NewsImpactAnalyst().run(data, llm)
+    sentiment = SentimentAnalyst().run(data, llm)
+    technical = TechnicalAnalyst().run(data, llm)
+    bull = ConstructiveCaseAnalyst().run(fundamental, news, sentiment, technical, llm)
+    bear = RiskCaseAnalyst().run(fundamental, news, sentiment, technical, bull, llm)
+    debate = DebateModerator().run(bull, bear, llm)
+
+    data.source_metadata["language"] = "en"
+    ResearchReporter().run(data, fundamental, news, sentiment, technical, bull, bear, debate.model_dump(mode="json"), [], llm)
+    english_prompt = llm.calls[-1]["user"]
+    assert "Translate and rewrite every human-readable final report field" not in english_prompt
+
+    data.source_metadata["language"] = "zh"
+    ResearchReporter().run(data, fundamental, news, sentiment, technical, bull, bear, debate.model_dump(mode="json"), [], llm)
+    chinese_prompt = llm.calls[-1]["user"]
+    assert "Translate and rewrite every human-readable final report field" in chinese_prompt
+    assert "schema keys and controlled enum values" in chinese_prompt
+
+
 def test_news_analyst_uses_llm_driven_tool_loop():
     llm = FakeLLMClient()
     request = RunRequest(symbol="BTC-USDT-SWAP", asset_class="crypto", horizon="short_term", llm_provider="fake")

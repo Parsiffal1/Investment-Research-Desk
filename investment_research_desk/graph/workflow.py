@@ -1200,24 +1200,26 @@ class ResearchWorkflow:
 
 
 def render_markdown_brief(final: FinalResearchContext) -> str:
+    language = str(final.source_metadata.get("language", "en"))
+    h = _markdown_labels(language)
     drivers = "\n".join(f"- {item}" for item in final.key_drivers) or "- None"
     risks = "\n".join(f"- {item}" for item in final.key_risks) or "- None"
     return (
-        f"# Investment Research Brief: {final.symbol}\n\n"
-        f"Use as research context only. This is not financial advice, an order instruction, or position sizing guidance.\n\n"
-        f"- Horizon: {final.horizon}\n"
-        f"- Market regime: {final.market_regime}\n"
-        f"- Directional view: {final.directional_view}\n"
-        f"- Directional rationale: {final.directional_rationale}\n"
-        f"- Balanced view: {final.balanced_view}\n"
-        f"- Risk level: {final.risk_level}\n"
-        f"- Confidence: {final.confidence}\n\n"
-        f"## Context\n\n{final.news_impact_summary}\n\n"
-        f"## Technical State\n\n{final.technical_summary}\n\n"
-        f"## Constructive Case\n\n{final.constructive_case.thesis}\n\n"
-        f"## Risk Case\n\n{final.risk_case.thesis}\n\n"
-        f"## Key Drivers\n\n{drivers}\n\n"
-        f"## Key Risks\n\n{risks}\n"
+        f"# {h['brief_title']}: {final.symbol}\n\n"
+        f"{h['boundary']}\n\n"
+        f"- {h['horizon']}: {_report_value(final.horizon, language)}\n"
+        f"- {h['market_regime']}: {_report_value(final.market_regime, language)}\n"
+        f"- {h['directional_view']}: {_report_value(final.directional_view, language)}\n"
+        f"- {h['directional_rationale']}: {final.directional_rationale}\n"
+        f"- {h['balanced_view']}: {_report_value(final.balanced_view, language)}\n"
+        f"- {h['risk_level']}: {_report_value(final.risk_level, language)}\n"
+        f"- {h['confidence']}: {final.confidence}\n\n"
+        f"## {h['context']}\n\n{final.news_impact_summary}\n\n"
+        f"## {h['technical_state']}\n\n{final.technical_summary}\n\n"
+        f"## {h['constructive_case']}\n\n{final.constructive_case.thesis}\n\n"
+        f"## {h['risk_case']}\n\n{final.risk_case.thesis}\n\n"
+        f"## {h['key_drivers']}\n\n{drivers}\n\n"
+        f"## {h['key_risks']}\n\n{risks}\n"
     )
 
 
@@ -1240,37 +1242,37 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"# {h['title']}: {final.symbol}",
             h["boundary"],
             f"## {h['executive']}\n"
-            f"- Asset class: {final.asset_class}\n"
-            f"- Horizon: {final.horizon}\n"
-            f"- Market regime: {final.market_regime}\n"
-            f"- Directional view: {final.directional_view}\n"
-            f"- Directional rationale: {final.directional_rationale}\n"
-            f"- Balanced view: {final.balanced_view}\n"
-            f"- Risk level: {final.risk_level}\n"
-            f"- Confidence: {final.confidence}",
-            "## Fundamental / Macro Analyst\n"
-            f"- View: {fundamental.fundamental_view}\n"
-            f"- Confidence: {fundamental.confidence}\n\n"
-            f"### Key Drivers\n{_md_list(fundamental.key_drivers)}\n\n"
-            f"### Concerns\n{_md_list(fundamental.concerns)}\n\n"
-            f"### Evidence\n{_md_list(fundamental.evidence)}",
-            "## News / Macro Impact Analyst\n"
-            f"- Impact logic: {news.impact_logic}\n"
-            f"- Confidence: {news.confidence}\n"
-            f"- Asset impact: {news.asset_impact.get(final.symbol, 'mixed')}\n\n"
-            f"### Dominant Events\n{_md_list(news.dominant_events)}\n\n"
-            f"### Evidence\n{_md_list(news.evidence)}",
-            "## Sentiment Analyst\n"
-            f"- Crowd mood: {sentiment.crowd_mood}\n"
-            f"- Label: {sentiment.sentiment_label}\n"
-            f"- Score: {sentiment.sentiment_score}\n"
-            f"- Confidence: {sentiment.confidence}\n\n"
-            f"### Evidence\n{_md_list(sentiment.evidence)}",
-            "## Technical Analyst\n"
-            f"- View: {technical.technical_view}\n"
-            f"- Trend: {technical.trend}\n"
-            f"- Momentum: {technical.momentum}\n"
-            f"- Volatility regime: {technical.volatility_regime}\n"
+            f"- {h['asset_class']}: {_report_value(final.asset_class, language)}\n"
+            f"- {h['horizon']}: {_report_value(final.horizon, language)}\n"
+            f"- {h['market_regime']}: {_report_value(final.market_regime, language)}\n"
+            f"- {h['directional_view']}: {_report_value(final.directional_view, language)}\n"
+            f"- {h['directional_rationale']}: {final.directional_rationale}\n"
+            f"- {h['balanced_view']}: {_report_value(final.balanced_view, language)}\n"
+            f"- {h['risk_level']}: {_report_value(final.risk_level, language)}\n"
+            f"- {h['confidence']}: {final.confidence}",
+            f"## {h['fundamental_title']}\n"
+            f"- {h['view']}: {_report_value(fundamental.fundamental_view, language)}\n"
+            f"- {h['confidence']}: {fundamental.confidence}\n\n"
+            f"### {h['key_drivers']}\n{_md_list(fundamental.key_drivers)}\n\n"
+            f"### {h['concerns']}\n{_md_list(fundamental.concerns)}\n\n"
+            f"### {h['evidence']}\n{_md_list(fundamental.evidence)}",
+            f"## {h['news_title']}\n"
+            f"- {h['impact_logic']}: {news.impact_logic}\n"
+            f"- {h['confidence']}: {news.confidence}\n"
+            f"- {h['asset_impact']}: {_report_value(news.asset_impact.get(final.symbol, 'mixed'), language)}\n\n"
+            f"### {h['dominant_events']}\n{_md_list(news.dominant_events)}\n\n"
+            f"### {h['evidence']}\n{_md_list(news.evidence)}",
+            f"## {h['sentiment_title']}\n"
+            f"- {h['crowd_mood']}: {sentiment.crowd_mood}\n"
+            f"- {h['label']}: {_report_value(sentiment.sentiment_label, language)}\n"
+            f"- {h['score']}: {sentiment.sentiment_score}\n"
+            f"- {h['confidence']}: {sentiment.confidence}\n\n"
+            f"### {h['evidence']}\n{_md_list(sentiment.evidence)}",
+            f"## {h['technical_title']}\n"
+            f"- {h['view']}: {_report_value(technical.technical_view, language)}\n"
+            f"- {h['trend']}: {_report_value(technical.trend, language)}\n"
+            f"- {h['momentum']}: {_report_value(technical.momentum, language)}\n"
+            f"- {h['volatility_regime']}: {_report_value(technical.volatility_regime, language)}\n"
             f"- RSI 14: {technical.rsi_14}\n"
             f"- MACD state: {technical.macd_state}\n"
             f"- ATR 14: {technical.atr_14}\n"
@@ -1284,17 +1286,17 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"- SWAP context: {technical.swap_context_summary or 'None'}\n"
             f"- Support zones: {', '.join(map(str, technical.support_zones)) or 'None'}\n"
             f"- Resistance zones: {', '.join(map(str, technical.resistance_zones)) or 'None'}\n"
-            f"- Confidence: {technical.confidence}",
-            "## Bull / Constructive Researcher\n"
-            f"### Thesis\n{constructive.thesis}\n\n"
-            f"### Evidence\n{_md_list(constructive.evidence)}\n\n"
-            f"### Conditions\n{_md_list(constructive.conditions)}\n\n"
-            f"- Confidence: {constructive.confidence}",
-            "## Bear / Risk Researcher\n"
-            f"### Thesis\n{risk.thesis}\n\n"
-            f"### Evidence\n{_md_list(risk.evidence)}\n\n"
-            f"### Conditions\n{_md_list(risk.conditions)}\n\n"
-            f"- Confidence: {risk.confidence}",
+            f"- {h['confidence']}: {technical.confidence}",
+            f"## {h['bull_title']}\n"
+            f"### {h['thesis']}\n{constructive.thesis}\n\n"
+            f"### {h['evidence']}\n{_md_list(constructive.evidence)}\n\n"
+            f"### {h['conditions']}\n{_md_list(constructive.conditions)}\n\n"
+            f"- {h['confidence']}: {constructive.confidence}",
+            f"## {h['bear_title']}\n"
+            f"### {h['thesis']}\n{risk.thesis}\n\n"
+            f"### {h['evidence']}\n{_md_list(risk.evidence)}\n\n"
+            f"### {h['conditions']}\n{_md_list(risk.conditions)}\n\n"
+            f"- {h['confidence']}: {risk.confidence}",
             f"## {h['debate']}\n"
             f"- Rounds: {debate.get('round_count', 1)}\n"
             f"- Points of agreement: {_inline_list(debate.get('points_of_agreement', []))}\n"
@@ -1302,25 +1304,25 @@ def render_markdown_report(state: dict[str, Any]) -> str:
             f"- Evidence quality notes: {_inline_list(debate.get('evidence_quality_notes', []))}\n\n"
             f"### {h['debate_conclusion']}\n{debate.get('reporter_handoff', 'None')}\n\n"
             f"### Round Log\n{_debate_round_log(debate.get('rounds', []))}",
-            "## Final Research Reporter\n"
-            f"### Fundamental Summary\n{final.fundamental_summary}\n\n"
-            f"### News Impact Summary\n{final.news_impact_summary}\n\n"
-            f"### Sentiment Summary\n{final.sentiment_summary}\n\n"
-            f"### Technical Summary\n{final.technical_summary}\n\n"
-            f"### Key Drivers\n{_md_list(final.key_drivers)}\n\n"
-            f"### Key Risks\n{_md_list(final.key_risks)}\n\n"
-            f"### Uncertainty Factors\n{_md_list(final.uncertainty_factors)}",
+            f"## {h['final_reporter']}\n"
+            f"### {h['fundamental_summary']}\n{final.fundamental_summary}\n\n"
+            f"### {h['news_summary']}\n{final.news_impact_summary}\n\n"
+            f"### {h['sentiment_summary']}\n{final.sentiment_summary}\n\n"
+            f"### {h['technical_summary']}\n{final.technical_summary}\n\n"
+            f"### {h['key_drivers']}\n{_md_list(final.key_drivers)}\n\n"
+            f"### {h['key_risks']}\n{_md_list(final.key_risks)}\n\n"
+            f"### {h['uncertainty']}\n{_md_list(final.uncertainty_factors)}",
             f"## {h['data_metadata']}\n"
-            f"- OHLCV bars: {len(data.ohlcv)}\n"
-            f"- Market context sections: {', '.join(data.market_context.keys()) or 'None'}\n"
-            f"- News events: {len(data.news_events)}\n"
-            f"- Sentiment inputs: {len(data.sentiment_inputs)}\n"
-            f"- Provider mode: {data.source_metadata.get('provider_mode', 'unknown')}\n"
-            f"- Tool policy: {data.source_metadata.get('tool_call_policy', 'unknown')}\n"
-            f"- Agent execution mode: {data.source_metadata.get('agent_execution_mode', 'unknown')}\n"
-            f"- Sentiment runtime: {data.source_metadata.get('sentiment_runtime', 'main')}\n"
-            f"- Provider warnings: {_inline_list(_flatten_warnings(data.source_metadata.get('agent_tool_warnings')))}\n"
-            f"- Guardrail violations: {_guardrail_summary(metrics)}",
+            f"- {h['ohlcv_bars']}: {len(data.ohlcv)}\n"
+            f"- {h['market_context_sections']}: {', '.join(data.market_context.keys()) or 'None'}\n"
+            f"- {h['news_events']}: {len(data.news_events)}\n"
+            f"- {h['sentiment_inputs']}: {len(data.sentiment_inputs)}\n"
+            f"- {h['provider_mode']}: {data.source_metadata.get('provider_mode', 'unknown')}\n"
+            f"- {h['tool_policy']}: {data.source_metadata.get('tool_call_policy', 'unknown')}\n"
+            f"- {h['agent_execution_mode']}: {data.source_metadata.get('agent_execution_mode', 'unknown')}\n"
+            f"- {h['sentiment_runtime']}: {data.source_metadata.get('sentiment_runtime', 'main')}\n"
+            f"- {h['provider_warnings']}: {_inline_list(_flatten_warnings(data.source_metadata.get('agent_tool_warnings')))}\n"
+            f"- {h['guardrail_violations']}: {_guardrail_summary(metrics)}",
             f"## {h['usage_constraints']}\n{_md_list(final.usage_constraints)}",
             f"## {h['downstream']}\n{final.downstream_agent_context}",
         ]
@@ -1331,24 +1333,127 @@ def _markdown_labels(language: str) -> dict[str, str]:
     if language == "zh":
         return {
             "title": "Investment Research Desk 投研策略台报告",
+            "brief_title": "Investment Research Desk 投研摘要",
             "boundary": "仅作投研上下文使用，不是投资建议、下单指令、仓位建议或收益承诺。",
             "executive": "执行摘要",
-            "debate": "Bull/Bear 辩论",
+            "asset_class": "资产类别",
+            "horizon": "研究周期",
+            "market_regime": "市场状态",
+            "directional_view": "方向判断",
+            "directional_rationale": "判断依据",
+            "balanced_view": "综合观点",
+            "risk_level": "风险等级",
+            "confidence": "置信度",
+            "context": "上下文",
+            "technical_state": "技术状态",
+            "constructive_case": "建设性情景",
+            "risk_case": "风险情景",
+            "fundamental_title": "基本面/宏观分析师",
+            "news_title": "新闻/宏观影响分析师",
+            "sentiment_title": "情绪分析师",
+            "technical_title": "技术分析师",
+            "bull_title": "建设性研究员",
+            "bear_title": "风险研究员",
+            "final_reporter": "最终研究报告",
+            "view": "观点",
+            "key_drivers": "关键驱动",
+            "concerns": "担忧事项",
+            "evidence": "证据",
+            "impact_logic": "影响逻辑",
+            "asset_impact": "资产影响",
+            "dominant_events": "主要事件",
+            "crowd_mood": "市场情绪",
+            "label": "标签",
+            "score": "分数",
+            "trend": "趋势",
+            "momentum": "动量",
+            "volatility_regime": "波动状态",
+            "thesis": "核心论点",
+            "conditions": "成立条件",
+            "debate": "多空辩论",
             "debate_conclusion": "辩论结论",
+            "final_reporter": "最终研究报告",
+            "fundamental_summary": "基本面/宏观摘要",
+            "news_summary": "新闻影响摘要",
+            "sentiment_summary": "情绪摘要",
+            "technical_summary": "技术摘要",
+            "key_risks": "关键风险",
+            "uncertainty": "不确定因素",
             "data_metadata": "数据与运行元信息",
+            "ohlcv_bars": "OHLCV K线数量",
+            "market_context_sections": "市场上下文模块",
+            "news_events": "新闻事件数量",
+            "sentiment_inputs": "情绪输入数量",
+            "provider_mode": "数据源模式",
+            "tool_policy": "工具策略",
+            "agent_execution_mode": "Agent执行模式",
+            "sentiment_runtime": "情绪运行时",
+            "provider_warnings": "数据源警告",
+            "guardrail_violations": "护栏违规",
             "usage_constraints": "使用约束",
             "downstream": "下游上下文",
         }
     return {
         "title": "Investment Research Desk Report",
+        "brief_title": "Investment Research Brief",
         "boundary": (
             "Use as research context only. This is not financial advice, an order instruction, "
             "position sizing guidance, or a profitability claim."
         ),
         "executive": "Executive Context",
+        "asset_class": "Asset class",
+        "horizon": "Horizon",
+        "market_regime": "Market regime",
+        "directional_view": "Directional view",
+        "directional_rationale": "Directional rationale",
+        "balanced_view": "Balanced view",
+        "risk_level": "Risk level",
+        "confidence": "Confidence",
+        "context": "Context",
+        "technical_state": "Technical State",
+        "constructive_case": "Constructive Case",
+        "risk_case": "Risk Case",
+        "fundamental_title": "Fundamental / Macro Analyst",
+        "news_title": "News / Macro Impact Analyst",
+        "sentiment_title": "Sentiment Analyst",
+        "technical_title": "Technical Analyst",
+        "bull_title": "Bull / Constructive Researcher",
+        "bear_title": "Bear / Risk Researcher",
+        "final_reporter": "Final Research Reporter",
+        "view": "View",
+        "key_drivers": "Key Drivers",
+        "concerns": "Concerns",
+        "evidence": "Evidence",
+        "impact_logic": "Impact logic",
+        "asset_impact": "Asset impact",
+        "dominant_events": "Dominant Events",
+        "crowd_mood": "Crowd mood",
+        "label": "Label",
+        "score": "Score",
+        "trend": "Trend",
+        "momentum": "Momentum",
+        "volatility_regime": "Volatility regime",
+        "thesis": "Thesis",
+        "conditions": "Conditions",
         "debate": "Bull / Bear Debate",
         "debate_conclusion": "Debate Conclusion",
+        "fundamental_summary": "Fundamental Summary",
+        "news_summary": "News Impact Summary",
+        "sentiment_summary": "Sentiment Summary",
+        "technical_summary": "Technical Summary",
+        "key_risks": "Key Risks",
+        "uncertainty": "Uncertainty Factors",
         "data_metadata": "Data And Run Metadata",
+        "ohlcv_bars": "OHLCV bars",
+        "market_context_sections": "Market context sections",
+        "news_events": "News events",
+        "sentiment_inputs": "Sentiment inputs",
+        "provider_mode": "Provider mode",
+        "tool_policy": "Tool policy",
+        "agent_execution_mode": "Agent execution mode",
+        "sentiment_runtime": "Sentiment runtime",
+        "provider_warnings": "Provider warnings",
+        "guardrail_violations": "Guardrail violations",
         "usage_constraints": "Usage Constraints",
         "downstream": "Downstream Context",
     }
@@ -1356,6 +1461,43 @@ def _markdown_labels(language: str) -> dict[str, str]:
 
 def _md_list(items: list[Any]) -> str:
     return "\n".join(f"- {item}" for item in items) if items else "- None"
+
+
+def _report_value(value: Any, language: str) -> str:
+    text = str(value)
+    if language != "zh":
+        return text
+    mapping = {
+        "bullish": "看多",
+        "bearish": "看空",
+        "neutral": "中性",
+        "mixed": "分歧",
+        "mixed_to_bullish": "分歧偏多",
+        "mixed_to_bearish": "分歧偏空",
+        "neutral_to_bullish": "中性偏多",
+        "neutral_to_bearish": "中性偏空",
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "unknown": "未知",
+        "short_term": "短期",
+        "medium_term": "中期",
+        "intraday": "日内",
+        "swing": "波段",
+        "crypto": "加密资产",
+        "equity": "股票",
+        "equity_index": "股票指数",
+        "precious_metal": "贵金属",
+        "commodity": "大宗商品",
+        "fx": "外汇",
+        "other": "其他",
+        "uptrend": "上行趋势",
+        "downtrend": "下行趋势",
+        "sideways": "震荡",
+        "positive": "正向",
+        "negative": "负向",
+    }
+    return mapping.get(text, text)
 
 
 def _inline_list(items: list[Any]) -> str:
