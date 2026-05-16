@@ -4,6 +4,7 @@ from typer.testing import CliRunner
 
 from investment_research_desk.cli import app
 from investment_research_desk.cli import _format_eval_value
+from investment_research_desk.cli import _welcome_panel
 from investment_research_desk.cli_contract import build_run_request
 
 
@@ -15,6 +16,14 @@ def test_cli_help():
 
     assert result.exit_code == 0
     assert "Investment Research Desk" in result.output
+
+
+def test_welcome_banner_uses_unambiguous_project_name():
+    rendered = str(_welcome_panel().renderable)
+
+    assert "Investment Research Desk" in rendered
+    assert "Ivestment" not in rendered
+    assert "Desd" not in rendered
 
 
 def test_cli_report_fixture(tmp_path):
