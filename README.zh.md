@@ -3,7 +3,7 @@
 <div align="center">
   <h1>Investment Research Desk / 投研策略台</h1>
   <p><strong>一个面向股票和加密资产的本地优先多 Agent 投研工作台。</strong></p>
-  <p>把市场数据、新闻、宏观事件、情绪输入、技术结构和 Bull / Bear 辩论整理成结构化投研材料，方便人工复核和后续研究消费。</p>
+  <p>把市场数据、新闻、宏观事件、情绪输入、技术结构、可选 QLoRA 微调能力和 Bull / Bear 辩论整理成结构化投研材料，方便人工复核和后续研究消费。</p>
   <p>
     <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue" />
     <img alt="CLI" src="https://img.shields.io/badge/interface-CLI-black" />
@@ -55,7 +55,7 @@ Investment Research Desk / 投研策略台是一个**本地 CLI-first 的多 Age
 - 在最终报告前加入 Bull / Bear research debate
 - 带 contracts、traces、metrics、guardrails 的结构化输出
 - 可稳定复现的离线 fixture 模式
-- 只作用于 Sentiment Analyst 的可选 WSL2 + CUDA LoRA adapter
+- 可选的 WSL2 + CUDA QLoRA 微调与 adapter 评测路径
 - 中英文两种报告输出模式
 
 ## 界面预览
@@ -116,7 +116,7 @@ uv run ird demo
 2. 如果想先理解完整流程，不想依赖实时 API，先跑 `uv run ird demo`。
 3. 正常使用时运行 `uv run ird` 进入引导式交互流程。
 4. 跑完后重点看 `runs/<run_id>/` 下的 artifacts、trace、metrics 和 brief。
-5. 只有在你确实需要可选情绪适配器时，再进入 WSL LoRA 路径。
+5. 只有在你确实需要 adapter 训练、held-out 评测和可选微调运行路径时，再进入 WSL LoRA 路径。
 
 ## 系统怎么工作
 
@@ -140,7 +140,7 @@ Run Controller
 - 所有输出都只是**投研上下文**。
 - 项目**不会**下单，也不会管理账户。
 - 系统会强制执行 tool budget、金融范围约束、relevance filtering 和输出 guardrails。
-- 可选 LoRA adapter **只影响 Sentiment Analyst**，不会替换整个报告流水线。
+- 可选 LoRA 路径是对主研究工作流的增强，而不是对多 Agent 报告流水线的替代。
 
 ## 数据源
 
@@ -166,7 +166,7 @@ investment_research_desk/
   eval/             轻量评测套件
   graph/            LangGraph 工作流编排
   llm/              Fake 与 Ollama-compatible LLM client
-  lora/             Sentiment LoRA 数据准备、训练与评估
+  lora/             QLoRA 数据准备、训练与 held-out 评估
   providers/        外部数据源与 fixture adapter
   tools/            确定性指标、guardrails、metrics
   cli.py            主 CLI 入口
@@ -256,15 +256,32 @@ runs/{run_id}/
 
 这也是项目的重要价值之一：它不仅能跑交互流程，还能把整个过程沉淀为可复查的本地产物。
 
-## 可选 Sentiment LoRA 路径
+## 可选 QLoRA 微调路径
 
-可选 LoRA 路径面向 **WSL2 + CUDA**，并且只定制情绪分类这一条支路。
+可选 LoRA 路径面向 **WSL2 + CUDA**，是在常规本地 CLI 之外补充的一条可复现 adapter 训练与 held-out 评测工作流。
+
+### Baseline 与微调后评测对比
+
+仓库当前把 baseline 指标固化在 `investment_research_desk/lora/sentiment.py` 里；微调后的对比行则会在完整 WSL 训练后生成到 `eval/results/lora_full/heldout_eval_results.json`。
+
+| 版本 | ACC | Macro-F1 | 来源 |
+| --- | ---: | ---: | --- |
+| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
+| 微调后 adapter | 运行 `bash scripts/wsl/run_lora_pipeline.sh full` 后生成 | 运行 `bash scripts/wsl/run_lora_pipeline.sh full` 后生成 | `eval/results/lora_full/heldout_eval_results.json` |
+
+如果你想把这张表替换成你最近一次 full run 的真实数字，训练完成后把 held-out 评测产物中的 `accuracy` 和 `macro_f1` 填回这里即可。
 
 环境准备与 smoke test：
 
 ```bash
 bash scripts/wsl/setup_lora_env.sh
 bash scripts/wsl/run_lora_pipeline.sh smoke
+```
+
+运行完整训练 / 评测：
+
+```bash
+bash scripts/wsl/run_lora_pipeline.sh full
 ```
 
 使用最新 adapter 跑报告：
@@ -294,7 +311,7 @@ uv run pytest
 - 本地优先 CLI 投研工作流
 - 多 Agent 结构化分析
 - live + fixture 双路径运行
-- 可选 sentiment adapter 路径
+- 可选 QLoRA adapter 路径
 
 当前不做：
 - 下单执行

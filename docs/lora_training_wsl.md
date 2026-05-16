@@ -1,6 +1,6 @@
-# Sentiment LoRA Training on WSL2 CUDA
+# QLoRA Training on WSL2 CUDA
 
-This project trains the first adapter only for financial sentiment classification. The Windows CLI remains usable without training dependencies; this workflow is for WSL2 + CUDA.
+This project includes an optional QLoRA fine-tuning path for financial classification work. The standard Windows/local CLI remains usable without training dependencies; this workflow is for WSL2 + CUDA.
 
 ## Environment
 
@@ -63,6 +63,21 @@ The full run writes local artifacts such as:
 - `models/investment-research-desk-lora-sentiment/<timestamp>/dev_metrics.json`
 - `eval/results/lora_full/heldout_eval_results.json`
 - `eval/results/lora_full/heldout_eval_results.md`
+
+## Held-out benchmark reporting
+
+The checked-in baseline lives in `investment_research_desk/lora/sentiment.py`:
+
+| Variant | ACC | Macro-F1 |
+| --- | ---: | ---: |
+| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 |
+
+After a full run, read the fine-tuned metrics from:
+
+- `eval/results/lora_full/heldout_eval_results.json`
+- `eval/results/lora_full/heldout_eval_results.md`
+
+Those artifacts are the source of truth for the fine-tuned `accuracy` and `macro_f1` values that should be copied into the root README comparison table.
 
 ## Publishing
 

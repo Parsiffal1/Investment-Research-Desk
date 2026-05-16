@@ -18,12 +18,12 @@ If you arrived here from the repository homepage, this page is the fastest way t
   - Standard local CLI path
   - Environment setup, Ollama startup, config check, report runs, and demo mode
 
-### I want to run the optional sentiment adapter in WSL
+### I want to run the optional adapter path in WSL
 - [`wsl_lora_adapter_guide.md`](wsl_lora_adapter_guide.md)
   - How to run reports in WSL with a trained adapter
   - Includes Ollama bridge notes and runtime verification steps
 
-### I want to train the sentiment LoRA adapter
+### I want to train the QLoRA adapter path
 - [`lora_training_wsl.md`](lora_training_wsl.md)
   - WSL2 + CUDA training workflow
   - Data sources, split hygiene, artifact structure, and release boundaries

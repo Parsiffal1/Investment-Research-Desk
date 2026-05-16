@@ -3,7 +3,7 @@
 <div align="center">
   <h1>Investment Research Desk</h1>
   <p><strong>A local-first multi-agent research desk for equities and crypto.</strong></p>
-  <p>Turn market data, news, macro context, sentiment, technical structure, and bull/bear debate into a structured research brief for human review.</p>
+  <p>Turn market data, news, macro context, sentiment, technical structure, optional QLoRA refinement, and bull/bear debate into a structured research brief for human review.</p>
   <p>
     <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue" />
     <img alt="CLI" src="https://img.shields.io/badge/interface-CLI-black" />
@@ -54,7 +54,7 @@ It is **not** a broker, execution engine, portfolio manager, or financial adviso
 - A bull vs. bear debate layer before the final report
 - Structured outputs with contracts, traces, metrics, and guardrails
 - Offline fixture mode for stable demos and regression tests
-- Optional WSL2 + CUDA sentiment LoRA adapter for the sentiment analyst only
+- Optional WSL2 + CUDA QLoRA fine-tuning and adapter evaluation path
 - English and Chinese report output modes
 
 ## What it looks like
@@ -115,7 +115,7 @@ uv run ird demo
 2. Start with `uv run ird demo` if you want to understand the full flow without live APIs.
 3. Run `uv run ird` for the guided interactive flow.
 4. Inspect `runs/<run_id>/` to review artifacts, traces, metrics, and the final brief.
-5. Only move to the WSL LoRA path if you want the optional sentiment adapter.
+5. Only move to the WSL LoRA path if you want adapter training, held-out evaluation, and the optional fine-tuned runtime path.
 
 ## How the system works
 
@@ -139,7 +139,7 @@ Important boundaries:
 - The output is **research context only**.
 - The project does **not** place orders or manage accounts.
 - The system enforces tool budgets, financial-scope query rules, relevance filtering, and output guardrails.
-- The optional LoRA adapter only affects the **Sentiment Analyst**, not the whole report pipeline.
+- The optional LoRA path is additive: it complements the research workflow without replacing the multi-agent report pipeline.
 
 ## Data sources
 
@@ -165,7 +165,7 @@ investment_research_desk/
   eval/             Lightweight evaluation suites
   graph/            LangGraph workflow orchestration
   llm/              Fake and Ollama-compatible LLM clients
-  lora/             Sentiment LoRA data prep, training, and eval
+  lora/             QLoRA data prep, training, and held-out evaluation
   providers/        External and fixture data adapters
   tools/            Deterministic indicators, guardrails, metrics
   cli.py            Main CLI entrypoint
@@ -254,15 +254,32 @@ runs/{run_id}/
 
 This is one of the main strengths of the project: the workflow is not just interactive, it is also inspectable after the run.
 
-## Optional sentiment LoRA path
+## Optional QLoRA fine-tuning path
 
-The optional LoRA path is designed for **WSL2 + CUDA** and only customizes sentiment classification.
+The optional LoRA path is designed for **WSL2 + CUDA** and adds a reproducible adapter-training and held-out evaluation workflow alongside the standard local CLI.
+
+### Baseline vs. fine-tuned evaluation
+
+The repository currently hardcodes the baseline metrics in `investment_research_desk/lora/sentiment.py`, and the fine-tuned row is produced by a full WSL run at `eval/results/lora_full/heldout_eval_results.json`.
+
+| Variant | ACC | Macro-F1 | Source |
+| --- | ---: | ---: | --- |
+| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
+| Fine-tuned adapter | Generated after `bash scripts/wsl/run_lora_pipeline.sh full` | Generated after `bash scripts/wsl/run_lora_pipeline.sh full` | `eval/results/lora_full/heldout_eval_results.json` |
+
+If you want this table populated with your latest full-run numbers, copy the `accuracy` and `macro_f1` fields from that held-out evaluation artifact after training completes.
 
 Setup and smoke test:
 
 ```bash
 bash scripts/wsl/setup_lora_env.sh
 bash scripts/wsl/run_lora_pipeline.sh smoke
+```
+
+Run a full training/eval cycle:
+
+```bash
+bash scripts/wsl/run_lora_pipeline.sh full
 ```
 
 Run a report with the latest adapter:
@@ -292,7 +309,7 @@ Current scope:
 - local-first CLI research workflow
 - multi-agent structured analysis
 - live + fixture-backed runs
-- optional sentiment adapter path
+- optional QLoRA adapter path
 
 Not in scope:
 - order placement

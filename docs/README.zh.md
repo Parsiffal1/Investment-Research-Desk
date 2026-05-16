@@ -18,12 +18,12 @@
   - 常规本地 CLI 路径
   - 包括环境配置、Ollama 启动、config check、报告运行和 demo 模式
 
-### 我想在 WSL 中启用可选 sentiment adapter
+### 我想在 WSL 中启用可选 adapter 路径
 - [`wsl_lora_adapter_guide.md`](wsl_lora_adapter_guide.md)
   - 说明如何在 WSL 中用训练好的 adapter 跑报告
   - 包括 Ollama bridge 和运行时验证步骤
 
-### 我想训练 sentiment LoRA adapter
+### 我想训练 QLoRA adapter 路径
 - [`lora_training_wsl.md`](lora_training_wsl.md)
   - WSL2 + CUDA 训练流程
   - 包括数据源、split hygiene、产物结构和发布边界
