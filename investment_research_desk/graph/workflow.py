@@ -144,6 +144,7 @@ class ResearchWorkflow:
             if request.fixture:
                 data = self.fixture_provider.load(request.fixture)
                 data.source_metadata["provider_mode"] = "fixture"
+                data.source_metadata["language"] = request.language
             else:
                 data = NormalizedData(
                     symbol=request.symbol,
@@ -1105,6 +1106,7 @@ class ResearchWorkflow:
         source_metadata: dict[str, Any] = {
             "provider_mode": seed_data.source_metadata.get("provider_mode", "live"),
             "agent_execution_mode": "parallel" if seed_data.source_metadata.get("provider_mode") == "fixture" else "tradingagents_configured",
+            "language": seed_data.source_metadata.get("language", request.language),
             "tool_call_policy": (
                 "fixture_data_scoped_to_agent_contract"
                 if seed_data.source_metadata.get("provider_mode") == "fixture"
