@@ -41,22 +41,58 @@ Investment Research Desk / 投研策略台是一个**本地 CLI-first 的多 Age
 - 可审计的多 Agent 分析流程
 - 需要沉淀 JSON、trace、metrics、Markdown brief 等研究产物的场景
 
-它**不是**券商、下单系统、资管工具，也不提供投资建议。
-
 ## 你能得到什么
 
 - 一个通过 `ird` 运行的引导式 CLI 工作流
-- 一条基于 LangGraph 的多 Agent 编排链路
-- 四类专职 analyst：
-  - Fundamental / Macro
-  - News / Macro Impact
-  - Sentiment
-  - Technical
+- 一条基于 LangGraph 的多 Agent 编排链路，内置一支 specialist analyst team：
+  - Fundamental / Macro Analyst
+  - News / Macro Impact Analyst
+  - Sentiment Analyst
+  - Technical Analyst
 - 在最终报告前加入 Bull / Bear research debate
 - 带 contracts、traces、metrics、guardrails 的结构化输出
 - 可稳定复现的离线 fixture 模式
 - 可选的 WSL2 + CUDA QLoRA 微调与 adapter 评测路径
 - 中英文两种报告输出模式
+
+## 可选 QLoRA 微调路径
+
+可选 LoRA 路径面向 **WSL2 + CUDA**，是在常规本地 CLI 之外补充的一条可复现 adapter 训练与 held-out 评测工作流。
+
+### Baseline 与微调后评测对比
+
+仓库当前把 baseline 指标固化在 `investment_research_desk/lora/sentiment.py` 里；微调后的结果记录在 `eval/results/lora_full/heldout_eval_results.json`。
+
+| 版本 | ACC | Macro-F1 | 来源 |
+| --- | ---: | ---: | --- |
+| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
+| 微调后 adapter | 0.8926 | 0.8760 | `eval/results/lora_full/heldout_eval_results.json` |
+
+相对于仓库里固化的 baseline，这次 held-out 评测带来了 **+0.1026 ACC** 和 **+0.0989 Macro-F1** 的提升。
+
+环境准备与 smoke test：
+
+```bash
+bash scripts/wsl/setup_lora_env.sh
+bash scripts/wsl/run_lora_pipeline.sh smoke
+```
+
+运行完整训练 / 评测：
+
+```bash
+bash scripts/wsl/run_lora_pipeline.sh full
+```
+
+使用最新 adapter 跑报告：
+
+```bash
+export IRD_SENTIMENT_ADAPTER_PATH=models/investment-research-desk-lora-sentiment/<timestamp>/adapter
+bash scripts/wsl/run_adapter_report.sh ETH-USDT-SWAP
+```
+
+进一步阅读：
+- [`docs/wsl_lora_adapter_guide.md`](docs/wsl_lora_adapter_guide.md)
+- [`docs/lora_training_wsl.md`](docs/lora_training_wsl.md)
 
 ## 界面预览
 
@@ -255,45 +291,6 @@ runs/{run_id}/
 ```
 
 这也是项目的重要价值之一：它不仅能跑交互流程，还能把整个过程沉淀为可复查的本地产物。
-
-## 可选 QLoRA 微调路径
-
-可选 LoRA 路径面向 **WSL2 + CUDA**，是在常规本地 CLI 之外补充的一条可复现 adapter 训练与 held-out 评测工作流。
-
-### Baseline 与微调后评测对比
-
-仓库当前把 baseline 指标固化在 `investment_research_desk/lora/sentiment.py` 里；微调后的对比行则会在完整 WSL 训练后生成到 `eval/results/lora_full/heldout_eval_results.json`。
-
-| 版本 | ACC | Macro-F1 | 来源 |
-| --- | ---: | ---: | --- |
-| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
-| 微调后 adapter | 0.8926 | 0.8760 | `eval/results/lora_full/heldout_eval_results.json` |
-
-相对于仓库里固化的 baseline，这次 held-out 评测带来了 **+0.1026 ACC** 和 **+0.0989 Macro-F1** 的提升。
-
-环境准备与 smoke test：
-
-```bash
-bash scripts/wsl/setup_lora_env.sh
-bash scripts/wsl/run_lora_pipeline.sh smoke
-```
-
-运行完整训练 / 评测：
-
-```bash
-bash scripts/wsl/run_lora_pipeline.sh full
-```
-
-使用最新 adapter 跑报告：
-
-```bash
-export IRD_SENTIMENT_ADAPTER_PATH=models/investment-research-desk-lora-sentiment/<timestamp>/adapter
-bash scripts/wsl/run_adapter_report.sh ETH-USDT-SWAP
-```
-
-进一步阅读：
-- [`docs/wsl_lora_adapter_guide.md`](docs/wsl_lora_adapter_guide.md)
-- [`docs/lora_training_wsl.md`](docs/lora_training_wsl.md)
 
 ## 测试
 

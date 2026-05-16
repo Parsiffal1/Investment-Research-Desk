@@ -41,21 +41,58 @@ It is built for:
 - auditable multi-agent analysis
 - producing downstream-ready research artifacts such as JSON, traces, metrics, and Markdown briefs
 
-It is **not** a broker, execution engine, portfolio manager, or financial advisor.
-
 ## What you get
 
 - A guided CLI workflow through `ird`
-- A LangGraph pipeline with specialized analysts for:
-  - Fundamental / Macro
-  - News / Macro Impact
-  - Sentiment
-  - Technical
+- A LangGraph pipeline with a specialist analyst team:
+  - Fundamental / Macro Analyst
+  - News / Macro Impact Analyst
+  - Sentiment Analyst
+  - Technical Analyst
 - A bull vs. bear debate layer before the final report
 - Structured outputs with contracts, traces, metrics, and guardrails
 - Offline fixture mode for stable demos and regression tests
 - Optional WSL2 + CUDA QLoRA fine-tuning and adapter evaluation path
 - English and Chinese report output modes
+
+## Optional QLoRA fine-tuning path
+
+The optional LoRA path is designed for **WSL2 + CUDA** and adds a reproducible adapter-training and held-out evaluation workflow alongside the standard local CLI.
+
+### Baseline vs. fine-tuned evaluation
+
+The repository currently hardcodes the baseline metrics in `investment_research_desk/lora/sentiment.py`, and the fine-tuned row is tracked in `eval/results/lora_full/heldout_eval_results.json`.
+
+| Variant | ACC | Macro-F1 | Source |
+| --- | ---: | ---: | --- |
+| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
+| Fine-tuned adapter | 0.8926 | 0.8760 | `eval/results/lora_full/heldout_eval_results.json` |
+
+That is a held-out gain of **+0.1026 ACC** and **+0.0989 Macro-F1** over the checked-in baseline.
+
+Setup and smoke test:
+
+```bash
+bash scripts/wsl/setup_lora_env.sh
+bash scripts/wsl/run_lora_pipeline.sh smoke
+```
+
+Run a full training/eval cycle:
+
+```bash
+bash scripts/wsl/run_lora_pipeline.sh full
+```
+
+Run a report with the latest adapter:
+
+```bash
+export IRD_SENTIMENT_ADAPTER_PATH=models/investment-research-desk-lora-sentiment/<timestamp>/adapter
+bash scripts/wsl/run_adapter_report.sh ETH-USDT-SWAP
+```
+
+Read more in:
+- [`docs/wsl_lora_adapter_guide.md`](docs/wsl_lora_adapter_guide.md)
+- [`docs/lora_training_wsl.md`](docs/lora_training_wsl.md)
 
 ## What it looks like
 
@@ -253,45 +290,6 @@ runs/{run_id}/
 ```
 
 This is one of the main strengths of the project: the workflow is not just interactive, it is also inspectable after the run.
-
-## Optional QLoRA fine-tuning path
-
-The optional LoRA path is designed for **WSL2 + CUDA** and adds a reproducible adapter-training and held-out evaluation workflow alongside the standard local CLI.
-
-### Baseline vs. fine-tuned evaluation
-
-The repository currently hardcodes the baseline metrics in `investment_research_desk/lora/sentiment.py`, and the fine-tuned row is produced by a full WSL run at `eval/results/lora_full/heldout_eval_results.json`.
-
-| Variant | ACC | Macro-F1 | Source |
-| --- | ---: | ---: | --- |
-| Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
-| Fine-tuned adapter | 0.8926 | 0.8760 | `eval/results/lora_full/heldout_eval_results.json` |
-
-That is a held-out gain of **+0.1026 ACC** and **+0.0989 Macro-F1** over the checked-in baseline.
-
-Setup and smoke test:
-
-```bash
-bash scripts/wsl/setup_lora_env.sh
-bash scripts/wsl/run_lora_pipeline.sh smoke
-```
-
-Run a full training/eval cycle:
-
-```bash
-bash scripts/wsl/run_lora_pipeline.sh full
-```
-
-Run a report with the latest adapter:
-
-```bash
-export IRD_SENTIMENT_ADAPTER_PATH=models/investment-research-desk-lora-sentiment/<timestamp>/adapter
-bash scripts/wsl/run_adapter_report.sh ETH-USDT-SWAP
-```
-
-Read more in:
-- [`docs/wsl_lora_adapter_guide.md`](docs/wsl_lora_adapter_guide.md)
-- [`docs/lora_training_wsl.md`](docs/lora_training_wsl.md)
 
 ## Testing
 
