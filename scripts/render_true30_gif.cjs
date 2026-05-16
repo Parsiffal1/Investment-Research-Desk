@@ -1,6 +1,11 @@
 #!/usr/bin/env node
-const { chromium } = require('playwright');
-const { mkdirSync, rmSync } = require('node:fs');
+let chromium;
+try {
+  ({ chromium } = require('playwright'));
+} catch {
+  ({ chromium } = require('playwright-core'));
+}
+const { mkdirSync, rmSync, existsSync } = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -34,6 +39,18 @@ function run(cmd, args) {
   if (res.status !== 0) process.exit(res.status ?? 1);
 }
 
+function resolveBrowserPath() {
+  const candidates = [
+    process.env.HERMES_CHROME_PATH,
+    process.env.CHROME_PATH,
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+  ].filter(Boolean);
+  return candidates.find(p => existsSync(p));
+}
+
 (async function main() {
   rmSync(frameDir, { recursive: true, force: true });
   mkdirSync(frameDir, { recursive: true });
@@ -41,7 +58,12 @@ function run(cmd, args) {
   rmSync(gifOut, { force: true });
   rmSync(palette, { force: true });
 
-  const browser = await chromium.launch({ headless: true });
+  const browserPath = resolveBrowserPath();
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: browserPath,
+    channel: browserPath ? undefined : 'chromium',
+  });
   const page = await browser.newPage({ viewport: { width, height } });
   await page.addInitScript(() => { window.__gifExport = true; });
   await page.goto(`file://${htmlAbs}`, { waitUntil: 'load', timeout: 60000 });
