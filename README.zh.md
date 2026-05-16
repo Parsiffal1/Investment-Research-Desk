@@ -267,9 +267,9 @@ runs/{run_id}/
 | 版本 | ACC | Macro-F1 | 来源 |
 | --- | ---: | ---: | --- |
 | Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
-| 微调后 adapter | 运行 `bash scripts/wsl/run_lora_pipeline.sh full` 后生成 | 运行 `bash scripts/wsl/run_lora_pipeline.sh full` 后生成 | `eval/results/lora_full/heldout_eval_results.json` |
+| 微调后 adapter | 0.8926 | 0.8760 | `eval/results/lora_full/heldout_eval_results.json` |
 
-如果你想把这张表替换成你最近一次 full run 的真实数字，训练完成后把 held-out 评测产物中的 `accuracy` 和 `macro_f1` 填回这里即可。
+相对于仓库里固化的 baseline，这次 held-out 评测带来了 **+0.1026 ACC** 和 **+0.0989 Macro-F1** 的提升。
 
 环境准备与 smoke test：
 

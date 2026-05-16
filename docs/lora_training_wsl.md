@@ -71,13 +71,17 @@ The checked-in baseline lives in `investment_research_desk/lora/sentiment.py`:
 | Variant | ACC | Macro-F1 |
 | --- | ---: | ---: |
 | Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 |
+| Fine-tuned adapter (`20260515T123418Z`) | 0.8926 | 0.8760 |
 
-After a full run, read the fine-tuned metrics from:
+Held-out deltas versus baseline:
+
+- Accuracy: **+0.1026**
+- Macro-F1: **+0.0989**
+
+The canonical result artifacts are:
 
 - `eval/results/lora_full/heldout_eval_results.json`
 - `eval/results/lora_full/heldout_eval_results.md`
-
-Those artifacts are the source of truth for the fine-tuned `accuracy` and `macro_f1` values that should be copied into the root README comparison table.
 
 ## Publishing
 

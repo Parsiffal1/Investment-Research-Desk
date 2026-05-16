@@ -265,9 +265,9 @@ The repository currently hardcodes the baseline metrics in `investment_research_
 | Variant | ACC | Macro-F1 | Source |
 | --- | ---: | ---: | --- |
 | Baseline Qwen3-8B forced-choice classifier | 0.7900 | 0.7771 | `investment_research_desk/lora/sentiment.py` |
-| Fine-tuned adapter | Generated after `bash scripts/wsl/run_lora_pipeline.sh full` | Generated after `bash scripts/wsl/run_lora_pipeline.sh full` | `eval/results/lora_full/heldout_eval_results.json` |
+| Fine-tuned adapter | 0.8926 | 0.8760 | `eval/results/lora_full/heldout_eval_results.json` |
 
-If you want this table populated with your latest full-run numbers, copy the `accuracy` and `macro_f1` fields from that held-out evaluation artifact after training completes.
+That is a held-out gain of **+0.1026 ACC** and **+0.0989 Macro-F1** over the checked-in baseline.
 
 Setup and smoke test:
 
