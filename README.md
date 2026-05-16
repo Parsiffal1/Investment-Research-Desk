@@ -1,110 +1,111 @@
-# Investment Research Desk / 投研策略台
+[English](README.md) | [中文](README.zh.md)
 
-Investment Research Desk is a local CLI-first multi-agent research system that turns market data, news, macro context, sentiment inputs, technical indicators, and bull/bear debate into structured investment research context. It is designed for research assistance and human review, not trade execution.
+<div align="center">
+  <h1>Investment Research Desk</h1>
+  <p><strong>A local-first multi-agent research desk for equities and crypto.</strong></p>
+  <p>Turn market data, news, macro context, sentiment, technical structure, and bull/bear debate into a structured research brief for human review.</p>
+  <p>
+    <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue" />
+    <img alt="CLI" src="https://img.shields.io/badge/interface-CLI-black" />
+    <img alt="Workflow" src="https://img.shields.io/badge/orchestration-LangGraph-6f42c1" />
+    <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green" />
+  </p>
+  <p>
+    <a href="#what-this-project-is">What this project is</a> ·
+    <a href="#what-it-looks-like">Preview</a> ·
+    <a href="#quick-start">Quick start</a> ·
+    <a href="#repository-structure">Repository structure</a> ·
+    <a href="#which-file-should-i-read-first">Where to read first</a>
+  </p>
+</div>
 
-投研策略台是一个本地 CLI-first 多 Agent 投研上下文生成系统，用于把市场数据、新闻与宏观事件、情绪输入、技术指标和 Bull/Bear debate 整理成结构化投研材料，供人工复核和后续策略研究使用。它不是交易执行系统。
+## What this project is
 
-## What It Is Not
+Investment Research Desk is a **local CLI-first multi-agent research system**. It collects market data, news, macro context, sentiment inputs, technical indicators, and bull/bear argumentation, then compresses them into a structured research context package.
 
-This project does not place orders, manage accounts, read balances, manage positions, provide position sizing, promise returns, or provide financial advice. The output is research context only.
+It is built for:
+- personal research workflows
+- repeatable local experimentation
+- auditable multi-agent analysis
+- producing downstream-ready research artifacts such as JSON, traces, metrics, and Markdown briefs
 
-本项目不下单、不管理账户或持仓、不读取账户余额、不输出仓位 sizing、不承诺收益，也不构成投资建议。所有输出仅作为投研上下文。
+It is **not** a broker, execution engine, portfolio manager, or financial advisor.
 
-## Features
+## What you get
 
-- Menu-style and scriptable CLI through `ird`.
-- LangGraph-based multi-agent workflow.
-- Analyst team for fundamental/macro, news impact, sentiment, and technical analysis.
-- Bull/Bear research debate and final research reporter.
-- ReAct-style agent tool loops with tool budgets and relevance filtering.
-- OKX public SWAP market context, Yahoo Finance, FMP, Finnhub, Tavily, StockTwits, Reddit, Jin10, and fixture fallback.
-- Structured Pydantic outputs, run artifacts, traces, metrics, and guardrails.
-- Optional Qwen3 sentiment LoRA adapter through Hugging Face PEFT.
-- English and Chinese report modes.
+- A guided CLI workflow through `ird`
+- A LangGraph pipeline with specialized analysts for:
+  - Fundamental / Macro
+  - News / Macro Impact
+  - Sentiment
+  - Technical
+- A bull vs. bear debate layer before the final report
+- Structured outputs with contracts, traces, metrics, and guardrails
+- Offline fixture mode for stable demos and regression tests
+- Optional WSL2 + CUDA sentiment LoRA adapter for the sentiment analyst only
+- English and Chinese report output modes
 
-## Screenshots
+## What it looks like
 
-### Interactive CLI Workflow
+The repository already includes real screenshots from the current CLI experience.
+
+### Interactive workflow
 
 ![Interactive CLI workflow](docs/assets/screenshots/cli-interactive-menu.png)
 
-### Live Multi-Agent Progress
+### Live multi-agent runtime
 
 ![Live multi-agent progress](docs/assets/screenshots/cli-live-progress.png)
 
-### Final Research Context Report
+### Final research context report
 
 ![Final research context report](docs/assets/screenshots/cli-final-report.png)
 
-## Quick Start
+## Quick start
 
-```powershell
+### Standard local path
+
+```bash
+git clone https://github.com/Parsiffal1/Investment-Research-Desk.git
+cd Investment-Research-Desk
 uv sync
-Copy-Item .env.example .env
-notepad .env
+cp .env.example .env
 uv run ird config check
 uv run pytest
 ```
 
-Interactive CLI:
+### Run the CLI
 
-```powershell
+```bash
 uv run ird
 ```
 
-Run a report:
+### Run a single report
 
-```powershell
-uv run ird report --symbol ETH-USDT-SWAP --asset-class crypto --horizon short_term --llm-provider ollama --language zh
+```bash
+uv run ird report \
+  --symbol ETH-USDT-SWAP \
+  --asset-class crypto \
+  --horizon short_term \
+  --llm-provider ollama \
+  --language zh
 ```
 
-Run an offline fixture demo:
+### Run the offline demo
 
-```powershell
+```bash
 uv run ird demo
 ```
 
-## Configuration
+## Recommended workflow
 
-Common `.env` settings:
+1. Use `uv run ird config check` to verify your environment and providers.
+2. Start with `uv run ird demo` if you want to understand the full flow without live APIs.
+3. Run `uv run ird` for the guided interactive flow.
+4. Inspect `runs/<run_id>/` to review artifacts, traces, metrics, and the final brief.
+5. Only move to the WSL LoRA path if you want the optional sentiment adapter.
 
-```text
-IRD_OLLAMA_BASE_URL=http://localhost:11434/v1
-IRD_OLLAMA_MODEL=qwen3:8b
-IRD_DEFAULT_LLM_PROVIDER=auto
-
-OKX_BASE_URL=https://www.okx.com
-TAVILY_API_KEY=
-FMP_API_KEY=
-FINNHUB_API_KEY=
-JIN10_API_URL=
-JIN10_API_KEY=
-
-IRD_AGENT_EXECUTION_MODE=sequential
-IRD_LLM_TIMEOUT_SEC=180
-IRD_AGENT_TOOL_LOOP_TIMEOUT_SEC=240
-IRD_AGENT_MAX_TOOL_CALLS=8
-IRD_REPORT_LANGUAGE=en
-```
-
-Do not commit `.env`. Use `.env.example` for shareable configuration.
-
-## CLI
-
-```text
-ird                         Interactive menu
-ird report                  Single research report
-ird batch                   Batch reports
-ird runs                    List run artifacts and checkpoints
-ird config check            Environment and provider preflight
-ird okx check               OKX public SWAP market data check
-ird eval                    Lightweight regression/evaluation suites
-ird lora prepare-data       Prepare sentiment LoRA data
-ird lora train              Train sentiment LoRA adapter
-ird lora eval               Evaluate sentiment LoRA adapter
-```
-
-## Workflow
+## How the system works
 
 ```text
 Run Controller
@@ -113,7 +114,7 @@ Run Controller
      -> News / Macro Impact Analyst
      -> Sentiment Analyst
      -> Technical Analyst
-  -> Bull/Bear Research Debate
+  -> Bull / Bear Research Debate
      -> Bull Researcher
      -> Bear Researcher
      -> Debate Moderator
@@ -122,26 +123,106 @@ Run Controller
   -> persist artifacts
 ```
 
-Live Ollama runs default to `IRD_AGENT_EXECUTION_MODE=sequential` to keep local Qwen3-8B execution stable. Fixture and fake-LLM test paths can still run in parallel.
+Important boundaries:
+- The output is **research context only**.
+- The project does **not** place orders or manage accounts.
+- The system enforces tool budgets, financial-scope query rules, relevance filtering, and output guardrails.
+- The optional LoRA adapter only affects the **Sentiment Analyst**, not the whole report pipeline.
 
-Each agent owns its tool boundary. The LLM decides whether to call tools, which query to use, how many times to call, and when to stop. The system enforces budgets, financial-scope query constraints, relevance filtering, required tool floors, and partial-evidence fallback.
+## Data sources
 
-## Data Sources
+Supported live and fallback inputs currently include:
+- **OKX** public SWAP market context and OHLCV
+- **Yahoo Finance**
+- **FMP**
+- **Finnhub**
+- **Tavily**
+- **StockTwits**
+- **Reddit**
+- **Jin10**
+- **Local fixtures**
 
-- OKX: public SWAP OHLCV, mark/index price, funding, open interest, recent trades, and order book context. Account, balance, position, and order endpoints are intentionally out of scope.
-- Yahoo Finance: equity OHLCV and ticker news fallback.
-- FMP: quote/profile/news and free-tier compatible fallback.
-- Finnhub: quote and company/general news.
-- Tavily: search enrichment.
-- StockTwits and Reddit: sentiment inputs.
-- Jin10: macro/news adapter when configured.
-- Fixtures: stable offline tests and demos.
+Provider failures such as free-tier `402/403` responses are kept in status and trace artifacts rather than being promoted into direct business conclusions.
 
-Provider errors such as free-tier `402/403` responses are recorded in provider status and traces, but they are not promoted into final business warnings.
+## Repository structure
 
-## Run Artifacts
+```text
+investment_research_desk/
+  agents/           Agent contracts, prompts, and core analyst logic
+  dataflows/        Vendor routing and tool wrappers
+  eval/             Lightweight evaluation suites
+  graph/            LangGraph workflow orchestration
+  llm/              Fake and Ollama-compatible LLM clients
+  lora/             Sentiment LoRA data prep, training, and eval
+  providers/        External and fixture data adapters
+  tools/            Deterministic indicators, guardrails, metrics
+  cli.py            Main CLI entrypoint
+  schemas.py        Shared Pydantic schemas
+  sentiment_runtime.py
 
-Each run writes:
+docs/
+  README.md                    Documentation index
+  current_implementation.md    Current implemented behavior
+  windows_cli_guide.md         Regular Windows CLI usage
+  wsl_lora_adapter_guide.md    Run reports with the LoRA adapter in WSL
+  lora_training_wsl.md         WSL training workflow
+
+scripts/wsl/
+  setup_lora_env.sh
+  run_lora_pipeline.sh
+  run_adapter_report.sh
+  verify_lora_env.py
+  start_ollama_bridge.ps1
+  install_wsl_ubuntu_admin.ps1
+
+data/fixtures/
+  gold_cpi.json                Offline fixture for demo and tests
+
+models/
+  investment-research-desk-lora-sentiment/.../adapter/
+
+runs/                          Local run artifacts (gitignored)
+tests/                         Regression and workflow tests
+```
+
+## Which file should I read first?
+
+- Want the product-level overview? Read **this README** first.
+- Want a documentation map? Read [`docs/README.md`](docs/README.md).
+- Want the exact currently implemented behavior? Read [`docs/current_implementation.md`](docs/current_implementation.md).
+- Want normal local usage without LoRA training? Read [`docs/windows_cli_guide.md`](docs/windows_cli_guide.md).
+- Want the WSL adapter runtime path? Read [`docs/wsl_lora_adapter_guide.md`](docs/wsl_lora_adapter_guide.md).
+- Want the training path for the sentiment adapter? Read [`docs/lora_training_wsl.md`](docs/lora_training_wsl.md).
+- Want to understand orchestration internals? Read [`investment_research_desk/graph/workflow.py`](investment_research_desk/graph/workflow.py).
+- Want to understand the analyst contracts and guardrails? Read [`investment_research_desk/agents/contracts.py`](investment_research_desk/agents/contracts.py) and [`investment_research_desk/tools/guardrails.py`](investment_research_desk/tools/guardrails.py).
+
+## Configuration
+
+Typical `.env` fields:
+
+```text
+IRD_OLLAMA_BASE_URL=http://localhost:11434/v1
+IRD_OLLAMA_MODEL=qwen3:8b
+IRD_DEFAULT_LLM_PROVIDER=auto
+
+OKX_BASE_URL=https://www.okx.com
+TAVILY_API_KEY=your_tavily_api_key
+FMP_API_KEY=your_fmp_api_key
+FINNHUB_API_KEY=your_finnhub_api_key
+JIN10_API_KEY=your_jin10_api_key
+
+IRD_AGENT_EXECUTION_MODE=sequential
+IRD_LLM_TIMEOUT_SEC=180
+IRD_AGENT_TOOL_LOOP_TIMEOUT_SEC=240
+IRD_AGENT_MAX_TOOL_CALLS=8
+IRD_REPORT_LANGUAGE=en
+```
+
+Keep real secrets in `.env` only. Do not commit them. `.env.example` should remain sanitized.
+
+## Run artifacts
+
+Every run writes a local folder such as:
 
 ```text
 runs/{run_id}/
@@ -159,52 +240,58 @@ runs/{run_id}/
   metrics.json
 ```
 
-Run artifacts are ignored by git because they may contain provider outputs, local paths, and research history.
+This is one of the main strengths of the project: the workflow is not just interactive, it is also inspectable after the run.
 
-## Sentiment LoRA Adapter
+## Optional sentiment LoRA path
 
-The first adapter is limited to Sentiment Analyst classification. It does not replace the main report LLM, the analyst team, or the Bull/Bear debate.
+The optional LoRA path is designed for **WSL2 + CUDA** and only customizes sentiment classification.
 
-Training and adapter runtime are intended for a WSL2 + CUDA environment:
+Setup and smoke test:
 
 ```bash
 bash scripts/wsl/setup_lora_env.sh
 bash scripts/wsl/run_lora_pipeline.sh smoke
 ```
 
-Run with adapter:
+Run a report with the latest adapter:
 
 ```bash
 export IRD_SENTIMENT_ADAPTER_PATH=models/investment-research-desk-lora-sentiment/<timestamp>/adapter
 bash scripts/wsl/run_adapter_report.sh ETH-USDT-SWAP
 ```
 
-If the adapter is published with the repository, `adapter_model.safetensors` is tracked through Git LFS.
+Read more in:
+- [`docs/wsl_lora_adapter_guide.md`](docs/wsl_lora_adapter_guide.md)
+- [`docs/lora_training_wsl.md`](docs/lora_training_wsl.md)
 
-## Documentation
+## Testing
 
-- `docs/current_implementation.md`: current implemented behavior.
-- `docs/windows_cli_guide.md`: Windows CLI usage.
-- `docs/wsl_lora_adapter_guide.md`: WSL + LoRA adapter usage.
-- `docs/lora_training_wsl.md`: LoRA training workflow.
+Run the full suite:
 
-## Tests
-
-```powershell
+```bash
 uv run pytest
 ```
 
-WSL runtime:
+The repository includes workflow tests, CLI tests, provider tests, LoRA-path tests, and evaluation regression coverage.
 
-```bash
-cd <PROJECT_DIR>
-source <WSL_VENV>/bin/activate
-python -m pytest
-```
+## Project status and boundaries
+
+Current scope:
+- local-first CLI research workflow
+- multi-agent structured analysis
+- live + fixture-backed runs
+- optional sentiment adapter path
+
+Not in scope:
+- order placement
+- account access
+- portfolio rebalancing
+- broker integration
+- autonomous trading
 
 ## License
 
-MIT License. See `LICENSE`.
+MIT License. See [`LICENSE`](LICENSE).
 
 ## Disclaimer
 
